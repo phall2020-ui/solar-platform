@@ -28,3 +28,6 @@ reports/
 jobs/inverter-daily-checks/client_secret_*.json
 jobs/inverter-daily-checks/credentials.json
 jobs/inverter-daily-checks/token.json
+
+# Keep irradiation datasets versioned
+!tools/irradiation-data/**/*.csv
