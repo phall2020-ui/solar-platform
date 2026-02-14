@@ -1,0 +1,63 @@
+# Inverter Monitoring Configuration
+# Copy this file to config.yaml and fill in your credentials
+
+polling_interval_hours: 2
+report_directory: "./reports"
+
+# Enable logging to file (in addition to console)
+log_to_file: true
+log_directory: "./logs"
+
+# Email Notifications
+# Send status reports via email every time they are generated
+email:
+  enabled: false
+  smtp_server: "smtp.gmail.com"  # For Gmail
+  smtp_port: 587
+  smtp_username: "your_email@gmail.com"
+  smtp_password: "your_app_password"  # Use app-specific password for Gmail
+  from_email: "your_email@gmail.com"
+  to_emails:
+    - "recipient1@example.com"
+    - "recipient2@example.com"
+  use_tls: true
+
+platforms:
+  # SolarEdge Monitoring API
+  # Get API key from: Admin > Site Access > API Access
+  solaredge:
+    enabled: false
+    api_key: "your_api_key_here"
+    site_ids: []  # Leave empty to auto-discover all sites
+
+  # Huawei FusionSolar - Northbound API
+  # Create API account: System > Enterprise Management > Northbound Management
+  huawei:
+    enabled: false
+    username: "your_northbound_api_username"
+    password: "your_password"
+    # Region options: eu5, intl, cn, ap2, etc.
+    region: "eu5"
+
+  # Solis / SolisCloud API
+  # Request API access: usservice@solisinverters.com (US/CA/MX)
+  # Other regions: Submit service ticket in SolisCloud
+  solis:
+    enabled: false
+    api_id: "your_api_id"
+    api_secret: "your_api_secret"
+    api_url: "https://www.soliscloud.com:13333"
+
+  # Sungrow iSolarCloud API
+  # Register at: https://developer.isolarcloud.com
+  sungrow:
+    enabled: false
+    appkey: "your_appkey"
+    secret: "your_secret"
+    username: "your_isolarcloud_username"
+    password: "your_isolarcloud_password"
+    # RSA public key provided by Sungrow after app approval
+    rsa_public_key: |
+      -----BEGIN PUBLIC KEY-----
+      YOUR_RSA_PUBLIC_KEY_HERE
+      -----END PUBLIC KEY-----

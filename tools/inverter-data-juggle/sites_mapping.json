@@ -1,0 +1,227 @@
+{
+    "PPA Park Hall": {
+        "platform": "solaredge",
+        "site_id": "4667531",
+        "juggle_uid": "?"
+    },
+    "PPA Uniroyal Global": {
+        "platform": "solaredge",
+        "site_id": "3933004",
+        "juggle_uid": "?"
+    },
+    "PPA Shawton Engineering Ltd": {
+        "platform": "solaredge",
+        "site_id": "2798969",
+        "juggle_uid": "?"
+    },
+    "PPA Princes Tuna": {
+        "platform": "solaredge",
+        "site_id": "4209270",
+        "juggle_uid": "?"
+    },
+    "PPA Panorama Kitchens": {
+        "platform": "solaredge",
+        "site_id": "4519032",
+        "juggle_uid": "?"
+    },
+    "PPA WALC Adult Learning Centre": {
+        "platform": "solaredge",
+        "site_id": "3829329",
+        "juggle_uid": "?"
+    },
+    "PPA Dunham Forest Golf Club": {
+        "platform": "solaredge",
+        "site_id": "3490228",
+        "juggle_uid": "?"
+    },
+    "PPA Burnley College": {
+        "platform": "solaredge",
+        "site_id": "2733539",
+        "juggle_uid": "?"
+    },
+    "PPA Bannatynes Wildmoor": {
+        "platform": "solaredge",
+        "site_id": "4338522",
+        "juggle_uid": "?"
+    },
+    "Smeed Dean Works Final": {
+        "platform": "solaredge",
+        "site_id": "4724518",
+        "juggle_uid": "?"
+    },
+    "PPA WALC Pagefield": {
+        "platform": "solaredge",
+        "site_id": "3823337",
+        "juggle_uid": "?"
+    },
+    "PPA WALC Leigh College": {
+        "platform": "solaredge",
+        "site_id": "3888537",
+        "juggle_uid": "?"
+    },
+    "PPA Valley Hydraulics": {
+        "platform": "solaredge",
+        "site_id": "2626861",
+        "juggle_uid": "?"
+    },
+    "PPA Swift Dental Group": {
+        "platform": "solaredge",
+        "site_id": "3656221",
+        "juggle_uid": "?"
+    },
+    "PPA Ink Tech": {
+        "platform": "solaredge",
+        "site_id": "4625192",
+        "juggle_uid": "?"
+    },
+    "PPA I&N Fabrications Ltd": {
+        "platform": "solaredge",
+        "site_id": "2688590",
+        "juggle_uid": "?"
+    },
+    "PPA Bannatynes Weybridge": {
+        "platform": "solaredge",
+        "site_id": "4283465",
+        "juggle_uid": "?"
+    },
+    "PPA Bannatynes Norwich": {
+        "platform": "solaredge",
+        "site_id": "4319038",
+        "juggle_uid": "?"
+    },
+    "PPA Bannatynes Darlington Head Office": {
+        "platform": "solaredge",
+        "site_id": "4307544",
+        "juggle_uid": "?"
+    },
+    "PPA Bannatynes Cookridge Hall": {
+        "platform": "solaredge",
+        "site_id": "4361798",
+        "juggle_uid": "?"
+    },
+    "PPA Bannatynes Colchester Kingsford Park": {
+        "platform": "solaredge",
+        "site_id": "4320553",
+        "juggle_uid": "?"
+    },
+    "PPA Bannatynes Bury St Edmunds": {
+        "platform": "solaredge",
+        "site_id": "4309872",
+        "juggle_uid": "?"
+    },
+    "PPA Bannatynes Braintree": {
+        "platform": "solaredge",
+        "site_id": "4284090",
+        "juggle_uid": "?"
+    },
+    "CASEPAK SUNNINGDALE": {
+        "platform": "solaredge",
+        "site_id": "4756575",
+        "juggle_uid": "?"
+    },
+    "Blachford UK": {
+        "platform": "solaredge",
+        "site_id": "4466155",
+        "juggle_uid": "AMP:00024"
+    },
+    "Newfold Farm": {
+        "platform": "juggle",
+        "site_id": "",
+        "juggle_uid": "ERS:00001"
+    },
+    "Cromwell Tools": {
+        "platform": "juggle",
+        "site_id": "",
+        "juggle_uid": "AMP:00001"
+    },
+    "Man City FC Training Ground": {
+        "platform": "juggle",
+        "site_id": "",
+        "juggle_uid": "AMP:00019"
+    },
+    "Sheldons Bakery": {
+        "platform": "juggle",
+        "site_id": "",
+        "juggle_uid": "AMP:00020"
+    },
+    "Merry Hill Shopping Centre": {
+        "platform": "juggle",
+        "site_id": "",
+        "juggle_uid": "AMP:00025"
+    },
+    "Metrocentre": {
+        "platform": "juggle",
+        "site_id": "",
+        "juggle_uid": "AMP:00027"
+    },
+    "FloPlast": {
+        "platform": "juggle",
+        "site_id": "",
+        "juggle_uid": "AMP:00032"
+    },
+    "Smeed Dean Works": {
+        "platform": "juggle",
+        "site_id": "",
+        "juggle_uid": "AMP:00034"
+    },
+    "NIC Barking": {
+        "platform": "juggle",
+        "site_id": "",
+        "juggle_uid": "AMP:00035"
+    },
+    "Finlay Beverages": {
+        "platform": "solis",
+        "site_id": "1298491919450070492",
+        "juggle_uid": "AMP:00031"
+    },
+    "Haverhill": {
+        "platform": "solis",
+        "site_id": "1298491919449993293",
+        "juggle_uid": "?"
+    },
+    "Sofina Foods": {
+        "platform": "solis",
+        "site_id": "1298491919449993293",
+        "juggle_uid": "AMP:00029"
+    },
+    "Smithy's Mushrooms PH1": {
+        "platform": "solis",
+        "site_id": "1298491919449898612",
+        "juggle_uid": "AMP:00028"
+    },
+    "Smithy's Mushrooms PH2": {
+        "platform": "solis",
+        "site_id": "1298491919449898612",
+        "juggle_uid": "AMP:00033"
+    },
+    "Smithy's Mushrooms PH1+2": {
+        "platform": "solis",
+        "site_id": "1298491919449898612",
+        "juggle_uid": "AMP:00036"
+    },
+    "Parfetts Birmingham": {
+        "platform": "solis",
+        "site_id": "1298491919449855581",
+        "juggle_uid": "AMP:00026"
+    },
+    "FALTEC Europe Ltd": {
+        "platform": "solis",
+        "site_id": "1298491919449813631",
+        "juggle_uid": "?"
+    },
+    "Hibernian Training Ground": {
+        "platform": "solis",
+        "site_id": "1298491919449006183",
+        "juggle_uid": "AMP:00003"
+    },
+    "Hibernian Stadium": {
+        "platform": "solis",
+        "site_id": "1298491919449005781",
+        "juggle_uid": "AMP:00002"
+    },
+    "Besblock": {
+        "platform": "solis",
+        "site_id": "1298491919448677612",
+        "juggle_uid": "?"
+    }
+}

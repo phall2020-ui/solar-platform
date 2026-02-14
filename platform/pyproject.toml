@@ -1,0 +1,69 @@
+[project]
+name = "solar-portfolio-manager"
+version = "1.1.0"
+description = "Unified Streamlit application for solar portfolio management"
+requires-python = ">=3.11"
+dependencies = [
+    # Core framework
+    "streamlit~=1.52",
+    "pandas~=2.3",
+    "numpy~=2.4",
+    "plotly~=6.5",
+    "kaleido~=1.2",
+    "openpyxl~=3.1",
+    "python-dotenv~=1.2",
+    "requests~=2.32",
+
+    # Solar / scientific
+    "pvlib~=0.13",
+    "matplotlib~=3.10",
+    "scipy~=1.16",
+
+    # Validation
+    "pydantic~=2.12",
+
+    # Observability
+    "structlog~=25.5",
+
+    # Data export
+    "pyarrow~=22.0",
+    "fastparquet~=2025.12",
+
+    # API and security
+    "bcrypt>=4.0.0",
+    "cryptography~=46.0",
+    "PyJWT~=2.10",
+
+    # Additional utilities
+    "python-dateutil~=2.9",
+    "pytz~=2025.2",
+
+    # Database
+    "duckdb~=1.4",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+exclude = [
+    ".venv",
+    "__pycache__",
+    "archive",
+    "scripts/dev",
+    "Solar Toolkit",
+    "Monthly reporting",
+    "legacy_extracts",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+markers = [
+    "integration: Integration tests against real DuckDB",
+    "e2e: End-to-end tests covering full workflows",
+    "benchmark: Performance benchmark tests",
+]

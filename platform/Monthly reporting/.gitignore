@@ -1,0 +1,20 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test databases (keep main solar_assets.db but ignore test DBs)
+test_upload.db*
+test_*.db*
+
+# SQLite temporary files
+*.db-shm
+*.db-wal
+
+# pytest cache
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp

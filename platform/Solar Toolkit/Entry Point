@@ -1,0 +1,1 @@
+{"cells":[{"cell_type":"code","source":"#!/usr/bin/env python3\n\"\"\"\nEntry point for the Solar Toolkit.\n\"\"\"\nfrom solar_toolkit.cli import run\n\nif __name__ == \"__main__\":\n    run()","outputs":[],"execution_count":null,"metadata":{}}],"metadata":{"colab":{"from_bard":true},"kernelspec":{"display_name":"Python 3","name":"python3"}},"nbformat":4,"nbformat_minor":0}

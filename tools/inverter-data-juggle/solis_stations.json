@@ -1,0 +1,247 @@
+[
+  {
+    "solis_id": "1298491919450070492",
+    "sno": "277dde",
+    "name": "Finlay Beverages",
+    "city": "Pontefract",
+    "capacity_kw": 1600.02,
+    "inv_count": 12,
+    "inv_online": 7,
+    "day_energy_station": 92.9,
+    "month_energy": 6236.9,
+    "all_energy": 500034.0,
+    "inv_etoday_sum": 169.7,
+    "inv_etotal_sum": 499.971,
+    "inv_serials": [
+      "1016010232110012",
+      "1016010232110015",
+      "1016010232110016",
+      "1812082249210133",
+      "1016010232110013",
+      "1016010232110003",
+      "1016010232110014",
+      "1016010232110023",
+      "1016010232110006",
+      "1812092246280102",
+      "1016010232140339",
+      "1016010232110022"
+    ]
+  },
+  {
+    "solis_id": "1298491919449993293",
+    "sno": "264539",
+    "name": "Haverhill",
+    "city": "Haverhill",
+    "capacity_kw": 1015.48,
+    "inv_count": 7,
+    "inv_online": 1,
+    "day_energy_station": 0.0,
+    "month_energy": 4300.3,
+    "all_energy": 639444.9,
+    "inv_etoday_sum": 393.2,
+    "inv_etotal_sum": 639.444,
+    "inv_serials": [
+      "1016010232140329",
+      "1016010232020035",
+      "1016010232090042",
+      "1016010232110001",
+      "1016010232140287",
+      "1016010232140288",
+      "1016010232140344"
+    ]
+  },
+  {
+    "solis_id": "1298491919449898612",
+    "sno": "24c1ec",
+    "name": "smithy mushroom",
+    "city": "Ormskirk",
+    "capacity_kw": 225.0,
+    "inv_count": 4,
+    "inv_online": 3,
+    "day_energy_station": 0.0,
+    "month_energy": 1905.6,
+    "all_energy": 196655.2,
+    "inv_etoday_sum": 121.3,
+    "inv_etotal_sum": 196.655,
+    "inv_serials": [
+      "181100022C090198",
+      "1812092249100033",
+      "1812092249100099",
+      "1812092249100086"
+    ]
+  },
+  {
+    "solis_id": "1298491919449855581",
+    "sno": "241134",
+    "name": "Parfetts Birmingham",
+    "city": "Birmingham",
+    "capacity_kw": 386.37,
+    "inv_count": 3,
+    "inv_online": 3,
+    "day_energy_station": 0.2,
+    "month_energy": 1718.4,
+    "all_energy": 349097.5,
+    "inv_etoday_sum": 0.2,
+    "inv_etotal_sum": 349.098,
+    "inv_serials": [
+      "1016030232150256",
+      "1812092246280131",
+      "1016030232150255"
+    ]
+  },
+  {
+    "solis_id": "1298491919449813631",
+    "sno": "236577",
+    "name": "FALTEC Europe Ltd",
+    "city": "Sunderland",
+    "capacity_kw": 674.96,
+    "inv_count": 5,
+    "inv_online": 3,
+    "day_energy_station": 69.2,
+    "month_energy": 2333.2,
+    "all_energy": 523115.9,
+    "inv_etoday_sum": 95.8,
+    "inv_etotal_sum": 523.115,
+    "inv_serials": [
+      "1016010231040096",
+      "1016010231040143",
+      "181104023C170021",
+      "1016010231040158",
+      "1016010231040093"
+    ]
+  },
+  {
+    "solis_id": "1298491919449773149",
+    "sno": "22c07c",
+    "name": "dets suez consett unit 5",
+    "city": "Consett",
+    "capacity_kw": 130.0,
+    "inv_count": 2,
+    "inv_online": 0,
+    "day_energy_station": 0.0,
+    "month_energy": 409.0,
+    "all_energy": 112374.9,
+    "inv_etoday_sum": 28.7,
+    "inv_etotal_sum": 112.375,
+    "inv_serials": [
+      "181101022C270042",
+      "11821222A160109"
+    ]
+  },
+  {
+    "solis_id": "1298491919449307140",
+    "sno": "1b55cf",
+    "name": "dets suez consett unit 4",
+    "city": "Consett",
+    "capacity_kw": 72.0,
+    "inv_count": 2,
+    "inv_online": 0,
+    "day_energy_station": 0.0,
+    "month_energy": 224.5,
+    "all_energy": 132519.1,
+    "inv_etoday_sum": 15.2,
+    "inv_etotal_sum": 132.519,
+    "inv_serials": [
+      "181103022A040021",
+      "181103022A080157"
+    ]
+  },
+  {
+    "solis_id": "1298491919449307029",
+    "sno": "1b5560",
+    "name": "dets suez consett unit 6",
+    "city": "Consett",
+    "capacity_kw": 24.0,
+    "inv_count": 2,
+    "inv_online": 0,
+    "day_energy_station": 0.0,
+    "month_energy": 90.1,
+    "all_energy": 56423.1,
+    "inv_etoday_sum": 5.8,
+    "inv_etotal_sum": 56.423,
+    "inv_serials": [
+      "1805070232030006",
+      "1805070232030035"
+    ]
+  },
+  {
+    "solis_id": "1298491919449306890",
+    "sno": "1b54c8",
+    "name": "dets suez consett unit 2",
+    "city": "Consett",
+    "capacity_kw": 100.0,
+    "inv_count": 4,
+    "inv_online": 0,
+    "day_energy_station": 0.0,
+    "month_energy": 385.8,
+    "all_energy": 223701.9,
+    "inv_etoday_sum": 17.5,
+    "inv_etotal_sum": 223.702,
+    "inv_serials": [
+      "181100022C090124",
+      "181100022B110234",
+      "181100022B110222",
+      "181100022C090157"
+    ]
+  },
+  {
+    "solis_id": "1298491919449006183",
+    "sno": "168178",
+    "name": "Hibernian Training Ground",
+    "city": "Ormiston",
+    "capacity_kw": 80.0,
+    "inv_count": 2,
+    "inv_online": 0,
+    "day_energy_station": 0.0,
+    "month_energy": 433.4,
+    "all_energy": 223575.8,
+    "inv_etoday_sum": 5.2,
+    "inv_etotal_sum": 223.576,
+    "inv_serials": [
+      "18050B0226300171",
+      "1812010227190048"
+    ]
+  },
+  {
+    "solis_id": "1298491919449005781",
+    "sno": "167f82",
+    "name": "Hibernian Stadium",
+    "city": "Edinburgh",
+    "capacity_kw": 100.0,
+    "inv_count": 1,
+    "inv_online": 1,
+    "day_energy_station": 0.0,
+    "month_energy": 424.4,
+    "all_energy": 48942.1,
+    "inv_etoday_sum": 0.0,
+    "inv_etotal_sum": 48.942,
+    "inv_serials": [
+      "11821224A30F015"
+    ]
+  },
+  {
+    "solis_id": "1298491919448677612",
+    "sno": "113803",
+    "name": "Besblock",
+    "city": "West Midlands",
+    "capacity_kw": 220.0,
+    "inv_count": 9,
+    "inv_online": 0,
+    "day_energy_station": 0.0,
+    "month_energy": 278.9,
+    "all_energy": 507166.2,
+    "inv_etoday_sum": 28.4,
+    "inv_etotal_sum": 507.166,
+    "inv_serials": [
+      "110460196140001",
+      "110822196060006",
+      "110460196050033",
+      "110470196050009",
+      "110822194170007",
+      "110832196240010",
+      "110460196050007",
+      "160D02202270046",
+      "160690204280009"
+    ]
+  }
+]

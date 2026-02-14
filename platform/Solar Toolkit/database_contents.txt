@@ -1,0 +1,65 @@
+# Solar Toolkit Database Contents
+
+## Database Location
+Path: ~/.solar_toolkit/plant_registry.sqlite
+
+## Database Schema
+
+### Table: plants
+Stores information about registered solar plants.
+
+Columns:
+- alias (TEXT, PRIMARY KEY): Human-readable plant identifier
+- plant_uid (TEXT, NOT NULL): Unique plant ID (e.g., ERS:00001)
+- inverter_ids (TEXT): JSON array of inverter device IDs
+- weather_id (TEXT): Weather station device ID
+- dc_size_kw (REAL): DC nameplate capacity in kilowatts
+- created_at (TIMESTAMP): Record creation timestamp
+
+## Sample Data
+
+The database currently contains 2 demo plants:
+
+1. Demo_Plant_1
+   - UID: ERS:00001
+   - Inverters: ["INV001", "INV002"]
+   - Weather Station: WETH001
+   - DC Size: 250.5 kW
+   - Created: 2025-12-03 22:27:01
+
+2. Demo_Plant_2
+   - UID: ERS:00002
+   - Inverters: ["INV003"]
+   - Weather Station: WETH002
+   - DC Size: 150.0 kW
+   - Created: 2025-12-03 22:27:01
+
+## Viewing Database Contents
+
+You can query the database using:
+
+1. CLI Command:
+   ```bash
+   python3 entry_point.py store-list
+   ```
+
+2. Direct SQLite:
+   ```bash
+   sqlite3 ~/.solar_toolkit/plant_registry.sqlite "SELECT * FROM plants;"
+   ```
+
+3. Python:
+   ```python
+   import sqlite3
+   conn = sqlite3.connect('~/.solar_toolkit/plant_registry.sqlite')
+   cursor = conn.cursor()
+   cursor.execute('SELECT * FROM plants')
+   print(cursor.fetchall())
+   ```
+
+## Additional Tables (Future Implementation)
+
+The following tables are planned for future implementation:
+- readings: Store operational data (power, irradiance, etc.)
+- devices: Device-level information
+- poa_data: SolarGIS plane-of-array irradiance data

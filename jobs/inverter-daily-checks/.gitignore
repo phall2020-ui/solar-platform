@@ -1,0 +1,36 @@
+# Ignore config with credentials
+config.yaml
+credentials.json
+token.json
+
+# Reports and logs
+reports/
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# State files
+.alert_state.json

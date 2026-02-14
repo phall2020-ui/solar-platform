@@ -1,0 +1,53 @@
+﻿Date: 2026-02-10
+Discovering Juggle plants...
+  Found 18 Juggle plants with devices
+Discovering Solis stations...
+  Found 8 Solis stations (excluding dets/consett)
+
+Fetching Juggle daily energy for each site (this may take a few minutes)...
+  Newfold Farm (ERS:00001)... Inv=5644.8, PV=5842.5, Solis=N/A
+  Cromwell Tools (AMP:00001)... Inv=427.9, PV=418.0, Solis=N/A
+  Hibernian Stadium (AMP:00002)... Inv=21.0, PV=0.0, Solis=21.6
+  Hibernian Training Ground (AMP:00003)... Inv=22.0, PV=21.2, Solis=21.3
+  Man City FC Training Ground (AMP:00019)... Inv=1437.7, PV=1313.1, Solis=N/A
+  Sheldons Bakery (AMP:00020)... Inv=130.9, PV=115.8, Solis=N/A
+  Blachford UK (AMP:00024)... Inv=77.8, PV=75.6, Solis=N/A
+  Merry Hill Shopping Centre (AMP:00025)... Inv=425.2, PV=412.6, Solis=N/A
+  Parfetts Birmingham (AMP:00026)... Inv=0.0, PV=160.4, Solis=160.5
+  Metrocentre (AMP:00027)... Inv=100.1, PV=96.0, Solis=N/A
+  Smithy's Mushrooms PH1 (AMP:00028)... Inv=142.0, PV=143.5, Solis=170.9
+  Sofina Foods (AMP:00029)... Inv=488.0, PV=484.4, Solis=N/A
+  Finlay Beverages (AMP:00031)... Inv=676.0, PV=327.5, Solis=338.9
+  FloPlast (AMP:00032)... Inv=1510.0, PV=1506.0, Solis=N/A
+  Smithy's Mushrooms PH2 (AMP:00033)... Inv=348.0, PV=346.7, Solis=170.9
+  Smeed Dean Works (AMP:00034)... Inv=680.2, PV=661.0, Solis=N/A
+  NIC Barking (AMP:00035)... Inv=0.0, PV=0.0, Solis=N/A
+  Smithy's Mushrooms PH1+2 (AMP:00036)... Inv=490.0, PV=490.2, Solis=170.9
+
+====================================================================================================
+  UNIFIED COMPARISON TABLE ÔÇö 2026-02-10
+====================================================================================================
+                       Site Juggle UID Juggle Inv (kWh) Juggle PV (kWh) Solis Day (kWh) Solis Month (kWh)             Solis Station
+               Newfold Farm  ERS:00001           5644.8          5842.5                                                            
+             Cromwell Tools  AMP:00001            427.9           418.0                                                            
+          Hibernian Stadium  AMP:00002             21.0             0.0            21.6             424.6         Hibernian Stadium
+  Hibernian Training Ground  AMP:00003             22.0            21.2            21.3             433.5 Hibernian Training Ground
+Man City FC Training Ground  AMP:00019           1437.7          1313.1                                                            
+            Sheldons Bakery  AMP:00020            130.9           115.8                                                            
+               Blachford UK  AMP:00024             77.8            75.6                                                            
+ Merry Hill Shopping Centre  AMP:00025            425.2           412.6                                                            
+        Parfetts Birmingham  AMP:00026              0.0           160.4           160.5            1719.3       Parfetts Birmingham
+                Metrocentre  AMP:00027            100.1            96.0                                                            
+     Smithy's Mushrooms PH1  AMP:00028            142.0           143.5           170.9            1905.9           smithy mushroom
+               Sofina Foods  AMP:00029            488.0           484.4                                                            
+           Finlay Beverages  AMP:00031            676.0           327.5           338.9            6146.0          Finlay Beverages
+                   FloPlast  AMP:00032           1510.0          1506.0                                                            
+     Smithy's Mushrooms PH2  AMP:00033            348.0           346.7           170.9            1905.9           smithy mushroom
+           Smeed Dean Works  AMP:00034            680.2           661.0                                                            
+                NIC Barking  AMP:00035                0             0.0                                                            
+   Smithy's Mushrooms PH1+2  AMP:00036            490.0           490.2           170.9            1905.9           smithy mushroom
+                  Haverhill                                                       462.8            4300.3                 Haverhill
+          FALTEC Europe Ltd                                                        95.6            2265.1         FALTEC Europe Ltd
+                   Besblock                                                        21.1             279.5                  Besblock
+
+Saved to unified_comparison_20260210.xlsx

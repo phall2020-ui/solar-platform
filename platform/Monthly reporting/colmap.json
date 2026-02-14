@@ -1,0 +1,11 @@
+{
+  "actual_gen": "Actual Gen (kWh)",
+  "wab": "Irradiance-based generation",
+  "budget_gen": "Forecast Gen (kWh)",
+  "pr_actual": "Actual PR (%)",
+  "pr_budget": "Forecast PR (%)",
+  "availability": "Availability (%)",
+  "site": "Site",
+  "date": "Date",
+  "capacity": "kWp"
+}

@@ -1,0 +1,8 @@
+{
+    "template_name": "All Inverters 15min",
+    "interval": "15 minute CSV",
+    "fields": [
+        "Yield / kWh",
+        "Power / kW"
+    ]
+}

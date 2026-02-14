@@ -1,0 +1,44 @@
+name: Weekly Data Pull
+
+on:
+  # Run every Sunday at 9 PM UTC (adjust for your timezone)
+  # Note: GitHub uses UTC. For UK (GMT/BST), 9 PM = 21:00 UTC in winter
+  schedule:
+    - cron: '0 21 * * 0'  # Sunday at 21:00 UTC
+  
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  data-pull:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Run data pull
+        env:
+          EMIG_API_KEY: ${{ secrets.EMIG_API_KEY }}
+          JUGGLE_API_KEY: ${{ secrets.JUGGLE_API_KEY }}
+        run: python scripts/data_pull.py
+      
+      - name: Upload logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: data-pull-logs
+          path: |
+            *.log
+          retention-days: 7

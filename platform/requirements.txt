@@ -1,0 +1,36 @@
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+plotly>=5.15.0
+kaleido>=0.2.1
+openpyxl>=3.1.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+pvlib>=0.10.0
+matplotlib>=3.7.0
+scipy>=1.11.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Observability
+structlog>=23.1.0
+
+# Data Export
+pyarrow>=14.0.0  # For parquet export
+fastparquet>=2023.10.0  # Alternative parquet engine
+
+# API and Security
+bcrypt>=4.0.0  # For secure password hashing (bcrypt)
+cryptography>=41.0.0  # For encryption utilities
+PyJWT>=2.8.0  # For JWT tokens
+
+# Additional utilities
+python-dateutil>=2.8.0
+pytz>=2023.3
+
+# Database
+duckdb>=1.0.0
+
+# Already satisfied by existing apps:
+# - All Solar Toolkit dependencies
+# - All Monthly Reporting dependencies

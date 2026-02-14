@@ -1,0 +1,374 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Lato:wght@400;500;600;700&display=swap');
+
+/* Main app styling */
+.stApp {
+    background-color: var(--ampyr-bg);
+    color: var(--ampyr-text);
+    font-family: 'Lato', 'Segoe UI', sans-serif;
+}
+.stApp *:focus-visible {
+    outline: 2px solid var(--ampyr-accent);
+    outline-offset: 2px;
+}
+
+/* Typography */
+h1, h2, h3, h4 {
+    font-family: 'Playfair Display', 'Georgia', serif;
+    color: var(--ampyr-text);
+    letter-spacing: 0.2px;
+}
+body, p, span, label, input, textarea, button, select {
+    font-family: 'Lato', 'Segoe UI', sans-serif;
+    color: var(--ampyr-text-secondary);
+}
+
+/* Headers */
+h1, h2, h3 {
+    color: var(--ampyr-primary);
+}
+
+/* Metrics and KPI cards */
+[data-testid="stMetricValue"] {
+    color: var(--ampyr-primary);
+    font-weight: 600;
+}
+
+/* Buttons - ensure all types have proper contrast */
+.stButton > button,
+button[kind="primary"],
+button[kind="secondary"],
+[data-testid="stBaseButton-primary"],
+[data-testid="stBaseButton-secondary"] {
+    background: linear-gradient(135deg, var(--ampyr-primary), var(--ampyr-secondary)) !important;
+    color: white !important;
+    border-radius: 999px;
+    border: 1px solid var(--ampyr-secondary);
+    padding: 0.55rem 1.2rem;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+    transition: transform 0.08s ease, box-shadow 0.12s ease;
+}
+
+.stButton > button:hover,
+button[kind="primary"]:hover,
+[data-testid="stBaseButton-primary"]:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+    border-color: var(--ampyr-accent);
+}
+.stButton > button:active {
+    transform: translateY(0px) scale(0.995);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+}
+
+/* Fix disabled button states */
+.stButton > button:disabled {
+    background: var(--ampyr-surface) !important;
+    color: var(--ampyr-text-secondary) !important;
+    opacity: 0.6;
+}
+
+/* Form submit buttons */
+.stForm [data-testid="stFormSubmitButton"] > button,
+[data-testid="stFormSubmitButton"] > button {
+    background: linear-gradient(135deg, var(--ampyr-primary), var(--ampyr-secondary)) !important;
+    color: white !important;
+    border-radius: 999px;
+    border: 1px solid var(--ampyr-secondary);
+    padding: 0.55rem 1.2rem;
+    font-weight: 600;
+}
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0d1428 0%, #0b1120 40%, #0b1120 100%);
+    border-right: 1px solid var(--ampyr-border);
+    color: var(--ampyr-text-secondary);
+}
+[data-testid="stSidebar"] .stButton>button {
+    background: var(--ampyr-surface);
+    color: var(--ampyr-text-secondary);
+    border-radius: 14px;
+    border: 1px solid var(--ampyr-border);
+    text-align: left;
+}
+[data-testid="stSidebar"] [data-testid="baseButton-primary"] {
+    background: linear-gradient(135deg, var(--ampyr-primary), var(--ampyr-secondary));
+    color: white;
+    border-left: 4px solid var(--ampyr-accent);
+    box-shadow: inset 4px 0 0 0 rgba(95,191,160,0.5);
+}
+[data-testid="stSidebar"] [data-testid="baseButton-secondary"]:hover {
+    border-color: var(--ampyr-primary);
+    color: white;
+}
+[data-testid="stSidebar"] .block-container {
+    padding-top: 1rem;
+}
+[data-testid="stSidebar"] .sidebar-logo {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin-bottom: 0.75rem;
+}
+[data-testid="stSidebar"] .sidebar-logo .glyph {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: radial-gradient(circle at 30% 30%, var(--ampyr-primary) 0%, var(--ampyr-secondary) 55%, #0b1120 100%);
+    border: 1px solid var(--ampyr-border);
+    box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+}
+[data-testid="stSidebar"] .sidebar-logo .wordmark {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.1rem;
+    letter-spacing: 0.8px;
+    color: white;
+}
+
+/* Info boxes */
+.stAlert {
+    border-radius: 4px;
+}
+
+/* Tables */
+.dataframe {
+    font-size: 0.9rem;
+    color: var(--ampyr-text-secondary);
+}
+.stDataFrame, .stTable {
+    background-color: transparent;
+}
+
+/* Inputs - ensure text visibility in dark mode */
+input, textarea, select {
+    background-color: var(--ampyr-surface) !important;
+    color: white !important;
+    border: 1px solid var(--ampyr-border);
+    border-radius: 8px;
+}
+
+/* Date inputs */
+.stDateInput input,
+[data-testid="stDateInput"] input {
+    background-color: var(--ampyr-surface) !important;
+    color: white !important;
+}
+
+/* Number inputs */
+.stNumberInput input,
+[data-testid="stNumberInput"] input {
+    background-color: var(--ampyr-surface) !important;
+    color: white !important;
+}
+
+/* Text inputs */
+.stTextInput input,
+[data-testid="stTextInput"] input {
+    background-color: var(--ampyr-surface) !important;
+    color: white !important;
+}
+
+/* Select boxes */
+.stSelectbox div[data-baseweb="select"] input {
+    color: white !important;
+}
+.stSelectbox div[data-baseweb="select"] > div {
+    background-color: var(--ampyr-surface) !important;
+    color: white !important;
+}
+.stSelectbox [data-baseweb="select"] span {
+    color: white !important;
+}
+
+/* Multi-select */
+.stMultiSelect [data-baseweb="select"] {
+    background-color: var(--ampyr-surface) !important;
+    color: white !important;
+    border-radius: 8px;
+    border: 1px solid var(--ampyr-border);
+}
+
+/* Slider values */
+.stSlider [data-testid="stThumbValue"] {
+    color: var(--ampyr-primary) !important;
+}
+
+/* Input containers */
+.stNumberInput, .stDateInput, .stTextInput {
+    background-color: transparent;
+}
+
+/* Custom card styling */
+.kpi-card {
+    background-color: var(--ampyr-surface);
+    border: 1px solid var(--ampyr-border);
+    border-radius: 12px;
+    padding: 1rem;
+    margin: 0.5rem 0;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.25);
+}
+
+.kpi-card-positive {
+    border-left: 4px solid var(--ampyr-positive);
+}
+
+.kpi-card-negative {
+    border-left: 4px solid var(--ampyr-negative);
+}
+
+.kpi-card-neutral {
+    border-left: 4px solid var(--ampyr-secondary);
+}
+
+/* Breadcrumbs */
+.breadcrumb-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 0.75rem;
+    color: var(--ampyr-text-secondary);
+    font-size: 0.9rem;
+}
+.breadcrumb-wrap .crumb {
+    color: var(--ampyr-text-secondary);
+}
+.breadcrumb-wrap .crumb.active {
+    color: var(--ampyr-primary);
+    font-weight: 600;
+}
+.breadcrumb-wrap .crumb-sep {
+    opacity: 0.6;
+}
+
+/* Empty states */
+.empty-state {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem;
+    border: 1px dashed var(--ampyr-border);
+    border-radius: 10px;
+    background: rgba(255,255,255,0.02);
+}
+.empty-state-icon {
+    font-size: 1.5rem;
+}
+.empty-state-title {
+    font-weight: 600;
+    color: var(--ampyr-primary);
+}
+.empty-state-help {
+    color: var(--ampyr-text-secondary);
+    font-size: 0.9rem;
+}
+
+/* Drag-and-drop hint */
+.dropzone-hint {
+    border: 1px dashed var(--ampyr-border);
+    background: rgba(255,255,255,0.03);
+    border-radius: 12px;
+    padding: 0.75rem 1rem;
+    font-size: 0.9rem;
+    color: var(--ampyr-text-secondary);
+    margin-bottom: 0.35rem;
+    text-align: center;
+}
+
+/* Prism header accent */
+.block-container {
+    position: relative;
+    overflow: visible;
+}
+.block-container::before {
+    content: "";
+    position: absolute;
+    top: -90px;
+    right: -120px;
+    width: 340px;
+    height: 340px;
+    background: linear-gradient(135deg, rgba(95,191,160,0.25), rgba(142,68,173,0.12), rgba(11,17,32,0));
+    filter: blur(12px);
+    transform: rotate(8deg);
+    pointer-events: none;
+}
+
+/* ── Phase 2: Design Token CSS Custom Properties ────────── */
+
+:root {
+    --ampyr-teal: #1B4D5C;
+    --ampyr-teal-light: #5FBFA0;
+    --ampyr-green: #6B8E23;
+
+    --status-excellent: #2ECC71;
+    --status-good: #5FBFA0;
+    --status-warning: #F39C12;
+    --status-critical: #E74C3C;
+    --status-offline: #95A5A6;
+
+    --font-family: 'Inter', 'Segoe UI', sans-serif;
+    --border-radius: 0.5rem;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.1);
+    --shadow-md: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+/* ── Phase 2: Status Badges ─────────────────────────────── */
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.status-excellent { background: #D5F5E3; color: #196F3D; }
+.status-good { background: #D1F2EB; color: #0E6655; }
+.status-warning { background: #FDEBD0; color: #935116; }
+.status-critical { background: #FADBD8; color: #922B21; }
+.status-offline { background: #E5E8E8; color: #566573; }
+
+/* ── Phase 2: KPI Cards ─────────────────────────────────── */
+
+.kpi-card-v2 {
+    background: white;
+    border-radius: var(--border-radius);
+    padding: 1.25rem;
+    box-shadow: var(--shadow-sm);
+    border-left: 4px solid var(--ampyr-teal);
+    transition: box-shadow 0.2s ease;
+}
+
+.kpi-card-v2:hover {
+    box-shadow: var(--shadow-md);
+}
+
+/* ── Phase 2: Tabs ──────────────────────────────────────── */
+
+.stTabs [data-baseweb="tab"] {
+    font-weight: 500;
+}
+
+.stTabs [aria-selected="true"] {
+    color: var(--ampyr-teal, var(--ampyr-primary)) !important;
+    border-bottom-color: var(--ampyr-teal, var(--ampyr-primary)) !important;
+}
+
+/* ── Phase 2: Dark Mode Overrides ───────────────────────── */
+
+[data-theme="dark"] .kpi-card-v2,
+.dark-mode .kpi-card-v2 {
+    background: #1E1E2E;
+    border-color: #2B354E;
+    color: #E0E0E0;
+}
+
+[data-theme="dark"] .status-excellent { background: #1A4731; color: #82E0AA; }
+[data-theme="dark"] .status-good { background: #0E3D2E; color: #76D7C4; }
+[data-theme="dark"] .status-warning { background: #4A3520; color: #F5CBA7; }
+[data-theme="dark"] .status-critical { background: #4A1E1E; color: #F1948A; }
+[data-theme="dark"] .status-offline { background: #2C3E50; color: #AEB6BF; }
