@@ -1,6 +1,12 @@
+"""
+NOTE: This script is non-functional — the legacy PDFReportGenerator class
+(formerly in modules/report_generator.py) has been removed.  Report
+generation now uses services.reporting (templates + data_fetcher +
+chart_exporter).  Keeping the file for reference only.
+"""
 import pandas as pd
 from modules.chart_utils import create_heatmap_chart, create_shading_chart
-from modules.report_generator import PDFReportGenerator
+# from modules.report_generator import PDFReportGenerator  # REMOVED — module deleted
 import datetime
 import os
 

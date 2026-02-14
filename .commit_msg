@@ -1,0 +1,12 @@
+chore: major cleanup - remove 21k lines dead code, consolidate config, fix security
+
+- Remove hardcoded secrets (Juggle, Solis, Notion credentials)
+- Fix SQL injection in export_service, reporting_bridge, auth_service
+- Fix 12 SQLite connection leaks in auth_service (context managers)
+- Delete archive/, Monthly reporting/, duplicate modules, Solar Toolkit scripts
+- Consolidate 7 config systems into services/config.py as single source
+- Fix 21 deprecated datetime.utcnow() calls across 15 files
+- Docker: add non-root user, .dockerignore, remove prod volume mount
+- Add missing deps (fuzzywuzzy, reportlab) to requirements.txt
+- Fix broken tests, redirect imports from deleted modules
+- All 401 tests pass, all 28 modules + 14 components load

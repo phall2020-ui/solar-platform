@@ -50,13 +50,7 @@ PAGE_GROUPS: dict[str, PageGroup] = {
                 roles=["viewer", "engineer", "manager", "admin"],
                 description="Real-time site monitoring",
             ),
-            "Data Overview": PageConfig(
-                module="modules.data_overview",
-                func="render",
-                icon="📋",
-                roles=["viewer", "engineer", "manager", "admin"],
-                description="Overview of all available data",
-            ),
+
         },
     ),
     "Analysis": PageGroup(
@@ -103,7 +97,7 @@ PAGE_GROUPS: dict[str, PageGroup] = {
                 description="Thermal loss analysis",
             ),
             "Waterfall Analysis": PageConfig(
-                module="modules.waterfall",
+                module="modules.loss_waterfall",
                 func="render",
                 icon="💧",
                 roles=["engineer", "manager", "admin"],
@@ -145,13 +139,7 @@ PAGE_GROUPS: dict[str, PageGroup] = {
     "Reporting": PageGroup(
         icon="📝",
         pages={
-            "Monthly Performance": PageConfig(
-                module="modules.monthly_reporting",
-                func="render",
-                icon="📅",
-                roles=["engineer", "manager", "admin"],
-                description="Monthly performance reports",
-            ),
+
             "Report Builder": PageConfig(
                 module="modules.report_builder",
                 func="render",
@@ -251,13 +239,7 @@ PAGE_GROUPS: dict[str, PageGroup] = {
                 roles=["admin"],
                 description="System health and diagnostics",
             ),
-            "Database Viewer": PageConfig(
-                module="modules.database_viewer",
-                func="render",
-                icon="🗃️",
-                roles=["admin"],
-                description="Raw database viewer",
-            ),
+
             "API Management": PageConfig(
                 module="modules.api_management_ui",
                 func="render",

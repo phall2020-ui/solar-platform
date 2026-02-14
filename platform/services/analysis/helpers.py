@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
@@ -63,7 +63,7 @@ def normalized_ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
 def date_bounds_or_default(start: datetime | None, end: datetime | None, days: int = 30) -> tuple[datetime, datetime]:
     if start and end:
         return start, end
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     if start and not end:
         return start, now
     if end and not start:

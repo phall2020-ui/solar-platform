@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import plotly.express as px
 import streamlit as st
@@ -13,7 +13,7 @@ from services.database.repository import PlantRepository
 
 
 def _default_date_range() -> tuple[datetime, datetime]:
-    end = datetime.utcnow()
+    end = datetime.now(UTC)
     return end - timedelta(days=30), end
 
 
@@ -42,7 +42,7 @@ def render() -> None:
         st.info("Select at least one plant.")
         return
 
-    end = datetime.utcnow()
+    end = datetime.now(UTC)
     start = end - timedelta(days=int(days))
     uids = [option_to_uid[item] for item in selected]
 

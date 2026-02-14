@@ -69,76 +69,70 @@ class AuthService:
 
     def _init_database(self):
         """Initialize the user database."""
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.cursor()
 
-        # Users table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                email TEXT UNIQUE NOT NULL,
-                full_name TEXT NOT NULL,
-                password_hash TEXT NOT NULL,
-                role TEXT NOT NULL,
-                is_active BOOLEAN DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_login TIMESTAMP,
-                preferences TEXT
-            )
-        """)
+            # Users table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    email TEXT UNIQUE NOT NULL,
+                    full_name TEXT NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    is_active BOOLEAN DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_login TIMESTAMP,
+                    preferences TEXT
+                )
+            """)
 
-        # Sessions table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                session_id TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP NOT NULL,
-                ip_address TEXT,
-                user_agent TEXT,
-                FOREIGN KEY (user_id) REFERENCES users(user_id)
-            )
-        """)
+            # Sessions table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    session_id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL,
+                    ip_address TEXT,
+                    user_agent TEXT,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            """)
 
-        # Audit log
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS audit_log (
-                log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                action TEXT NOT NULL,
-                resource TEXT,
-                details TEXT,
-                ip_address TEXT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(user_id)
-            )
-        """)
-
-        conn.commit()
-        conn.close()
+            # Audit log
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    action TEXT NOT NULL,
+                    resource TEXT,
+                    details TEXT,
+                    ip_address TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )
+            """)
 
     def _create_default_admin(self):
         """Create default admin user if no users exist."""
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.cursor()
 
-        cursor.execute("SELECT COUNT(*) FROM users")
-        if cursor.fetchone()[0] == 0:
-            # Generate a secure random password — change this immediately after first login
-            default_password = secrets.token_urlsafe(16)
-            password_hash = self._hash_password(default_password)
-            cursor.execute("""
-                INSERT INTO users (username, email, full_name, password_hash, role)
-                VALUES (?, ?, ?, ?, ?)
-            """, ("admin", "admin@ampyr.com", "Administrator", password_hash, "admin"))
-            conn.commit()
-            # Print the generated password so the admin can note it on first run
-            print(f"[AUTH] Default admin user created. Username: admin | Password: {default_password}")
-            print("[AUTH] *** Change this password immediately after first login! ***")
-            logger.warning("Default admin user created with auto-generated password. Change immediately.")
-
-        conn.close()
+            cursor.execute("SELECT COUNT(*) FROM users")
+            if cursor.fetchone()[0] == 0:
+                # Generate a secure random password — change this immediately after first login
+                default_password = secrets.token_urlsafe(16)
+                password_hash = self._hash_password(default_password)
+                cursor.execute("""
+                    INSERT INTO users (username, email, full_name, password_hash, role)
+                    VALUES (?, ?, ?, ?, ?)
+                """, ("admin", "admin@ampyr.com", "Administrator", password_hash, "admin"))
+                # Print the generated password so the admin can note it on first run
+                print(f"[AUTH] Default admin user created. Username: admin | Password: {default_password}")
+                print("[AUTH] *** Change this password immediately after first login! ***")
+                logger.warning("Default admin user created with auto-generated password. Change immediately.")
 
     def _hash_password(self, password: str) -> str:
         """Hash a password using bcrypt."""
@@ -163,11 +157,9 @@ class AuthService:
     def _upgrade_password_hash(self, user_id: int, password: str):
         """Upgrade a legacy password hash to bcrypt."""
         new_hash = self._hash_password(password)
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET password_hash = ? WHERE user_id = ?", (new_hash, user_id))
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET password_hash = ? WHERE user_id = ?", (new_hash, user_id))
         logger.info(f"Upgraded password hash to bcrypt for user_id={user_id}")
 
     def _check_rate_limit(self, username: str) -> bool:
@@ -207,17 +199,16 @@ class AuthService:
                            details=f"Account locked due to too many failed attempts: {username}")
             return None
 
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.cursor()
 
-        cursor.execute("""
-            SELECT user_id, username, email, full_name, role, is_active, password_hash
-            FROM users
-            WHERE username = ? AND is_active = 1
-        """, (username,))
+            cursor.execute("""
+                SELECT user_id, username, email, full_name, role, is_active, password_hash
+                FROM users
+                WHERE username = ? AND is_active = 1
+            """, (username,))
 
-        row = cursor.fetchone()
-        conn.close()
+            row = cursor.fetchone()
 
         if row:
             user_data = row[:6]
@@ -240,29 +231,25 @@ class AuthService:
 
     def _update_last_login(self, user_id: int):
         """Update last login timestamp."""
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE user_id = ?
-        """, (user_id,))
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE user_id = ?
+            """, (user_id,))
 
     def create_user(self, username: str, email: str, full_name: str,
                    password: str, role: str = "viewer") -> bool:
         """Create a new user."""
         try:
-            conn = sqlite3.connect(str(self.db_path))
-            cursor = conn.cursor()
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.cursor()
 
-            password_hash = self._hash_password(password)
-            cursor.execute("""
-                INSERT INTO users (username, email, full_name, password_hash, role)
-                VALUES (?, ?, ?, ?, ?)
-            """, (username, email, full_name, password_hash, role))
+                password_hash = self._hash_password(password)
+                cursor.execute("""
+                    INSERT INTO users (username, email, full_name, password_hash, role)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (username, email, full_name, password_hash, role))
 
-            conn.commit()
-            conn.close()
             return True
         except sqlite3.IntegrityError:
             return False
@@ -275,44 +262,39 @@ class AuthService:
         if not updates:
             return False
 
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.cursor()
 
-        set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
-        values = list(updates.values()) + [user_id]
+            set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
+            values = list(updates.values()) + [user_id]
 
-        cursor.execute(f"UPDATE users SET {set_clause} WHERE user_id = ?", values)
-        conn.commit()
-        conn.close()
+            cursor.execute(f"UPDATE users SET {set_clause} WHERE user_id = ?", values)
         return True
 
     def change_password(self, user_id: int, new_password: str) -> bool:
         """Change user password."""
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.cursor()
 
-        password_hash = self._hash_password(new_password)
-        cursor.execute("""
-            UPDATE users SET password_hash = ? WHERE user_id = ?
-        """, (password_hash, user_id))
+            password_hash = self._hash_password(new_password)
+            cursor.execute("""
+                UPDATE users SET password_hash = ? WHERE user_id = ?
+            """, (password_hash, user_id))
 
-        conn.commit()
-        conn.close()
         self._log_action(user_id, "password_change", "user")
         return True
 
     def get_user_by_id(self, user_id: int) -> User | None:
         """Get user by ID."""
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.cursor()
 
-        cursor.execute("""
-            SELECT user_id, username, email, full_name, role, is_active
-            FROM users WHERE user_id = ?
-        """, (user_id,))
+            cursor.execute("""
+                SELECT user_id, username, email, full_name, role, is_active
+                FROM users WHERE user_id = ?
+            """, (user_id,))
 
-        row = cursor.fetchone()
-        conn.close()
+            row = cursor.fetchone()
 
         if row:
             return User(*row)
@@ -320,16 +302,15 @@ class AuthService:
 
     def list_users(self) -> list[User]:
         """List all users."""
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.cursor()
 
-        cursor.execute("""
-            SELECT user_id, username, email, full_name, role, is_active
-            FROM users ORDER BY username
-        """)
+            cursor.execute("""
+                SELECT user_id, username, email, full_name, role, is_active
+                FROM users ORDER BY username
+            """)
 
-        users = [User(*row) for row in cursor.fetchall()]
-        conn.close()
+            users = [User(*row) for row in cursor.fetchall()]
         return users
 
     def delete_user(self, user_id: int) -> bool:
@@ -339,48 +320,44 @@ class AuthService:
     def _log_action(self, user_id: int | None, action: str, resource: str,
                    details: str = None):
         """Log user action to audit log."""
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.cursor()
 
-        cursor.execute("""
-            INSERT INTO audit_log (user_id, action, resource, details)
-            VALUES (?, ?, ?, ?)
-        """, (user_id, action, resource, details))
-
-        conn.commit()
-        conn.close()
+            cursor.execute("""
+                INSERT INTO audit_log (user_id, action, resource, details)
+                VALUES (?, ?, ?, ?)
+            """, (user_id, action, resource, details))
 
     def get_audit_log(self, user_id: int | None = None,
                      limit: int = 100) -> list[dict]:
         """Get audit log entries."""
-        conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.cursor()
 
-        if user_id:
-            cursor.execute("""
-                SELECT log_id, user_id, action, resource, details, timestamp
-                FROM audit_log WHERE user_id = ?
-                ORDER BY timestamp DESC LIMIT ?
-            """, (user_id, limit))
-        else:
-            cursor.execute("""
-                SELECT log_id, user_id, action, resource, details, timestamp
-                FROM audit_log
-                ORDER BY timestamp DESC LIMIT ?
-            """, (limit,))
+            if user_id:
+                cursor.execute("""
+                    SELECT log_id, user_id, action, resource, details, timestamp
+                    FROM audit_log WHERE user_id = ?
+                    ORDER BY timestamp DESC LIMIT ?
+                """, (user_id, limit))
+            else:
+                cursor.execute("""
+                    SELECT log_id, user_id, action, resource, details, timestamp
+                    FROM audit_log
+                    ORDER BY timestamp DESC LIMIT ?
+                """, (limit,))
 
-        logs = []
-        for row in cursor.fetchall():
-            logs.append({
-                "log_id": row[0],
-                "user_id": row[1],
-                "action": row[2],
-                "resource": row[3],
-                "details": row[4],
-                "timestamp": row[5],
-            })
+            logs = []
+            for row in cursor.fetchall():
+                logs.append({
+                    "log_id": row[0],
+                    "user_id": row[1],
+                    "action": row[2],
+                    "resource": row[3],
+                    "details": row[4],
+                    "timestamp": row[5],
+                })
 
-        conn.close()
         return logs
 
 

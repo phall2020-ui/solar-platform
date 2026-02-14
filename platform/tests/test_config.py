@@ -1,4 +1,4 @@
-"""Tests for configuration (unified_config.py and app_config/base.py).
+"""Tests for configuration (unified_config.py and services/config.py).
 
 These tests verify that the configuration singleton exposes all required
 attributes, returns expected structures, and that branding data is complete.
@@ -9,32 +9,32 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# app_config.base module-level constants
+# services.config module-level constants
 # ---------------------------------------------------------------------------
 
 class TestBaseConfig:
-    """Tests for raw app_config.base values."""
+    """Tests for raw services.config values."""
 
     def test_app_name_is_set(self):
-        from app_config.base import APP_NAME
+        from services.config import APP_NAME
         assert APP_NAME and isinstance(APP_NAME, str)
 
     def test_app_version_format(self):
-        from app_config.base import APP_VERSION
+        from services.config import APP_VERSION
         parts = APP_VERSION.split(".")
         assert len(parts) >= 2  # at least major.minor
 
     def test_base_path_is_path_object(self):
-        from app_config.base import BASE_PATH
+        from services.config import BASE_PATH
         assert isinstance(BASE_PATH, Path)
 
     def test_toolkit_db_is_path(self):
-        from app_config.base import TOOLKIT_DB
-        assert isinstance(TOOLKIT_DB, Path)
+        from services.config import get_settings
+        assert isinstance(get_settings().db_path, Path)
 
     def test_reporting_db_is_path(self):
-        from app_config.base import REPORTING_DB
-        assert isinstance(REPORTING_DB, Path)
+        from services.config import get_settings
+        assert isinstance(get_settings().db_path, Path)
 
 
 # ---------------------------------------------------------------------------

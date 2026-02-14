@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import plotly.express as px
 import plotly.graph_objects as go
@@ -19,7 +19,7 @@ from services.database.repository import PlantRepository
 # ---------------------------------------------------------------------------
 
 def _default_date_range():
-    end = datetime.utcnow()
+    end = datetime.now(UTC)
     return end - timedelta(days=30), end
 
 

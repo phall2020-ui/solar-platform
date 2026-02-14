@@ -3,7 +3,7 @@
 
 def test_config_imports():
     """Verify config module imports without error."""
-    from app_config.base import APP_NAME, APP_VERSION
+    from services.config import APP_NAME, APP_VERSION
 
     assert APP_NAME
     assert APP_VERSION

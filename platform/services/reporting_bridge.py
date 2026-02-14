@@ -10,7 +10,7 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 # Observability
-from app_config import base as app_config_base
+from services.config import get_settings as _get_config_settings
 from services.db_utils import get_connection as _db_get_connection
 from services.observability import get_logger
 
@@ -84,7 +84,7 @@ class ReportingBridge:
         """
         # Use the unified DuckDB database
         if db_path is None:
-            self.db_path = str(app_config_base.UNIFIED_DB)
+            self.db_path = str(_get_config_settings().db_path)
         else:
             self.db_path = db_path
         self.extractor = None

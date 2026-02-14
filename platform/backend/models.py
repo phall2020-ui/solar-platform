@@ -8,7 +8,7 @@ regardless of whether the storage is DuckDB, PostgreSQL, or anything else.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -165,7 +165,7 @@ class Alert(BaseModel):
     severity: AlertSeverity = AlertSeverity.INFO
     title: str = ""
     message: str = ""
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     acknowledged: bool = False
 
 
@@ -177,7 +177,7 @@ class Ticket(BaseModel):
     status: TicketStatus = TicketStatus.OPEN
     title: str = ""
     description: str = ""
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     resolved_at: datetime | None = None
     assignee: str | None = None
 

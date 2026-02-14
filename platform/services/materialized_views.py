@@ -5,7 +5,7 @@ Creates and refreshes precomputed aggregates for common dashboard queries.
 DuckDB supports this pattern well with fast analytical queries.
 We implement materialized views as regular tables that get refreshed on demand.
 """
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
@@ -138,7 +138,7 @@ class MaterializedViewsManager:
             return False
         
         query = self.VIEW_DEFINITIONS[view_name]
-        start_time = datetime.utcnow()
+        start_time = datetime.now(UTC)
         
         try:
             with self._get_connection() as conn:
@@ -166,7 +166,7 @@ class MaterializedViewsManager:
                 df.to_sql(view_name, conn, index=False, if_exists="replace")
                 
                 # Update metadata
-                duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+                duration_ms = (datetime.now(UTC) - start_time).total_seconds() * 1000
                 self._update_metadata(view_name, len(df), duration_ms, "success")
                 
                 self.logger.info(
@@ -199,7 +199,7 @@ class MaterializedViewsManager:
                     VALUES (?, ?, ?, ?, ?)
                 """, (
                     view_name,
-                    datetime.utcnow().isoformat(),
+                    datetime.now(UTC).isoformat(),
                     row_count,
                     duration_ms,
                     status
@@ -328,7 +328,7 @@ class MaterializedViewsManager:
         if not last_refresh:
             return True
         
-        age = (datetime.utcnow() - last_refresh).total_seconds()
+        age = (datetime.now(UTC) - last_refresh).total_seconds()
         return age > max_age_seconds
 
 

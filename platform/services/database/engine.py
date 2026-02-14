@@ -172,9 +172,9 @@ _engines: dict[str, DuckDBEngine] = {}
 def get_engine(db_path: str | Path | None = None) -> DuckDBEngine:
     """Get or create a DuckDBEngine singleton for a given DB path."""
     if db_path is None:
-        from app_config import TOOLKIT_DB
+        from services.config import get_settings
 
-        db_path = str(TOOLKIT_DB)
+        db_path = str(get_settings().db_path)
 
     key = str(db_path)
     if key not in _engines:

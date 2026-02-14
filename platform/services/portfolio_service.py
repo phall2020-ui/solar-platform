@@ -11,7 +11,7 @@ DESIGN NOTES FOR EXTRACTION:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -127,7 +127,7 @@ class PortfolioService:
 
     def get_generation_trend(self, days: int = 7) -> list[dict[str, Any]]:
         """Get daily generation trend for the portfolio."""
-        end = datetime.utcnow()
+        end = datetime.now(UTC)
         start = end - timedelta(days=days)
         return self._get_daily_generation_trend(start, end)
 
@@ -153,7 +153,7 @@ class PortfolioService:
 
     @staticmethod
     def _parse_time_range(label: str) -> tuple[datetime, datetime]:
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         if label == "Last 24 Hours":
             return now - timedelta(hours=24), now
         elif label == "Last 7 Days":

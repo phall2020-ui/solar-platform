@@ -1,42 +1,58 @@
 """Quick smoke test for services.reporting package imports."""
-import sys
-try:
+
+import pytest
+
+
+def test_reporting_models_import():
     from services.reporting.models import ReportType, SectionType, ReportSection, ReportTemplate, GeneratedReport
-    print("models OK")
+    assert ReportType is not None
+    assert SectionType is not None
 
+
+def test_reporting_templates_import():
     from services.reporting.templates import ALL_TEMPLATES, get_template, MONTHLY_REPORT, EXCOM_REPORT, OM_REPORT
-    print(f"templates OK - {len(ALL_TEMPLATES)} templates: {list(ALL_TEMPLATES.keys())}")
+    assert len(ALL_TEMPLATES) > 0
 
+
+def test_reporting_chart_exporter_import():
     from services.reporting.chart_exporter import chart_to_png, cleanup_temp_images
-    print("chart_exporter OK")
+    assert callable(chart_to_png)
 
+
+def test_reporting_data_fetcher_import():
     from services.reporting.data_fetcher import ReportDataFetcher
-    print("data_fetcher OK")
+    assert ReportDataFetcher is not None
 
+
+def test_reporting_pdf_renderer_import():
     from services.reporting.pdf_renderer import PDFRenderer
-    print("pdf_renderer OK")
+    assert PDFRenderer is not None
 
+
+def test_reporting_library_import():
     from services.reporting.report_library import ReportLibrary
-    print("report_library OK")
+    assert ReportLibrary is not None
 
+
+def test_reporting_scheduler_import():
     from services.reporting.scheduler import ReportScheduler, REPORT_SCHEDULES
-    print(f"scheduler OK - {len(REPORT_SCHEDULES)} schedules")
+    assert len(REPORT_SCHEDULES) > 0
 
+
+def test_reporting_init_reexports():
     from services.reporting import ReportType, SectionType, ALL_TEMPLATES, get_template
-    print("__init__ re-exports OK")
+    assert ReportType is not None
+    assert callable(get_template)
 
-    # Quick model instantiation check
+
+def test_reporting_model_instantiation():
     from datetime import UTC, datetime
+    from services.reporting.models import SectionType, ReportSection
+    from services.reporting.templates import get_template
+
     section = ReportSection(type=SectionType.COVER, title="Test")
     assert section.type == SectionType.COVER
+
     tmpl = get_template("monthly_performance")
     assert tmpl is not None
     assert tmpl.name == "Monthly Performance Report"
-    print("model instantiation OK")
-
-    print("\nALL IMPORTS PASSED")
-except Exception as e:
-    print(f"FAILED: {e}", file=sys.stderr)
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)

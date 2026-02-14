@@ -103,10 +103,10 @@ def render_system_health_widget():
             last_refresh = info.get('last_refresh')
             if last_refresh:
                 # Format as relative time
-                from datetime import datetime
+                from datetime import UTC, datetime
                 try:
                     refresh_dt = datetime.fromisoformat(last_refresh)
-                    age_mins = (datetime.utcnow() - refresh_dt).total_seconds() / 60
+                    age_mins = (datetime.now(UTC) - refresh_dt).total_seconds() / 60
                     if age_mins < 60:
                         age_str = f"{age_mins:.0f}m ago"
                     else:

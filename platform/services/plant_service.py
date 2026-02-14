@@ -10,7 +10,7 @@ DESIGN NOTES FOR EXTRACTION:
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -33,7 +33,7 @@ class PlantService:
         plant = self._plants.get_by_uid(uid)
         if plant is None:
             return None
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         pr = self._get_pr(uid, now - timedelta(hours=24), now)
         plant["current_pr"] = pr
         return plant
@@ -47,7 +47,7 @@ class PlantService:
 
     def get_daily_summary(self, uid: str) -> dict[str, Any]:
         """Get today's summary for a plant."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
         gen = self._get_generation(uid, today_start, now)
@@ -63,7 +63,7 @@ class PlantService:
 
     def get_production_data(self, uid: str, days: int = 30) -> pd.DataFrame:
         """Get production data for charts."""
-        end = datetime.utcnow()
+        end = datetime.now(UTC)
         start = end - timedelta(days=days)
         return self._readings.get_readings(uid, start=start, end=end)
 

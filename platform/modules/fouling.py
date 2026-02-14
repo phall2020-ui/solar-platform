@@ -1,7 +1,7 @@
 """Fouling (Soiling) Analysis – thin Streamlit renderer."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import plotly.express as px
 import plotly.graph_objects as go
@@ -37,7 +37,7 @@ def render() -> None:
         days = st.selectbox("Period (days)", [30, 60, 90, 180, 365], index=2)
 
     # ── Run engine ───────────────────────────────────────────────────
-    end = datetime.utcnow()
+    end = datetime.now(UTC)
     start = end - timedelta(days=int(days))
 
     with st.spinner("Running fouling analysis…"):

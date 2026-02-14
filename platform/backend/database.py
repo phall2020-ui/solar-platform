@@ -26,7 +26,7 @@ from typing import Any, Generator, Protocol, runtime_checkable
 import duckdb
 import pandas as pd
 
-from backend.config import Settings, get_settings
+from services.config import Settings, get_settings
 from backend.models import DataQualityScore, Plant, Reading, TimeSeriesQuery, TimeSeriesResponse
 
 logger = logging.getLogger(__name__)

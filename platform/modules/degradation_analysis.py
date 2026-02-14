@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import plotly.express as px
 import streamlit as st
@@ -31,7 +31,7 @@ def render() -> None:
     with col2:
         years = st.selectbox("Lookback", options=[1, 2, 3], index=0)
 
-    end = datetime.utcnow()
+    end = datetime.now(UTC)
     start = end - timedelta(days=365 * int(years))
 
     result = DegradationEngine().run(plant_map[plant], start, end)

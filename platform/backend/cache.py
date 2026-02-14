@@ -21,7 +21,7 @@ import threading
 import time
 from typing import Any, Protocol, runtime_checkable
 
-from backend.config import get_settings
+from services.config import get_settings
 
 logger = logging.getLogger(__name__)
 

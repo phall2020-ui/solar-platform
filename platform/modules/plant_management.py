@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 import streamlit as st
-from solar_toolkit.config import settings
 
 from services import legacy_toolkit
 from styles import render_alert, render_divider, render_section_header
@@ -47,7 +46,8 @@ def render():
                 # Fallback to direct path
                 from juggle_crawler import EmigApiClient
             
-            api_key = settings.JUGGLE_API_KEY or settings.EMIG_API_KEY
+            from solar_toolkit.config import settings as tk_settings
+            api_key = tk_settings.JUGGLE_API_KEY or tk_settings.EMIG_API_KEY
             if not api_key:
                 return [], "API key not configured"
             

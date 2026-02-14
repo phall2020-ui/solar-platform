@@ -1,18 +1,20 @@
 .git
-.github
-.venv
-.web
-.states
+.gitignore
 __pycache__
 *.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+tests/
+docs/
+*.md
+!README.md
 .env
-**/.env
-archive/
-scripts/dev/
-docs/development/
+.env.*
 *.db
 *.sqlite
 *.duckdb
-.DS_Store
-.pre-commit-config.yaml
-tests/
+archive/
+Monthly reporting/
+Solar Toolkit/

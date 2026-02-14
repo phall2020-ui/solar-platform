@@ -9,12 +9,16 @@ Daily sync of Juggle & Inverter Platform (Solis, SolarEdge) data to Notion.
 - Designed to run daily via GitHub Actions.
 """
 
+import argparse
 import os
 import sys
 import json
 import time
+import smtplib
 import requests
 from datetime import datetime, timedelta, date
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from typing import Dict, Any, Optional, Tuple
 
 try:
@@ -36,6 +40,16 @@ NOTION_DB_ID = os.environ.get('NOTION_DB_ID')
 REQUEST_TIMEOUT_S = float(os.environ.get("SYNC_REQUEST_TIMEOUT_S", "30"))
 SYNC_TIMEZONE = os.environ.get("SYNC_TIMEZONE", "Europe/London")
 SYNC_LAG_DAYS = int(os.environ.get("SYNC_LAG_DAYS", "1"))
+SYNC_MONTH_CLOSE_GRACE_DAYS = int(os.environ.get("SYNC_MONTH_CLOSE_GRACE_DAYS", "3"))
+SYNC_SNAPSHOT_DIR = os.environ.get("SYNC_SNAPSHOT_DIR", "sync_snapshots")
+
+SYNC_SMTP_SERVER = os.environ.get("SYNC_SMTP_SERVER", "")
+SYNC_SMTP_PORT = int(os.environ.get("SYNC_SMTP_PORT", "587"))
+SYNC_SMTP_USERNAME = os.environ.get("SYNC_SMTP_USERNAME", "")
+SYNC_SMTP_PASSWORD = os.environ.get("SYNC_SMTP_PASSWORD", "")
+SYNC_SMTP_USE_TLS = os.environ.get("SYNC_SMTP_USE_TLS", "true").lower() == "true"
+SYNC_EMAIL_FROM = os.environ.get("SYNC_EMAIL_FROM", "")
+SYNC_EMAIL_TO = [x.strip() for x in os.environ.get("SYNC_EMAIL_TO", "").split(",") if x.strip()]
 
 # Load SolarEdge Keys
 SOLAREDGE_KEYS_JSON = os.environ.get('SOLAREDGE_KEYS_JSON', '{}')
@@ -48,27 +62,132 @@ except json.JSONDecodeError:
 def val(x):
     return x.get('value') if isinstance(x, dict) else x
 
-def get_days_in_month_until_yesterday():
+def _today_in_sync_timezone() -> date:
     # Use a stable timezone so scheduled jobs are consistent year-round.
     if ZoneInfo:
         try:
-            today = datetime.now(ZoneInfo(SYNC_TIMEZONE)).date()
+            return datetime.now(ZoneInfo(SYNC_TIMEZONE)).date()
         except Exception:
-            today = date.today()
-    else:
-        today = date.today()
+            return date.today()
+    return date.today()
 
-    yesterday = today - timedelta(days=max(1, SYNC_LAG_DAYS))
-    
-    year = yesterday.year
-    month = yesterday.month
-    
-    num_days = yesterday.day
-    days = []
-    for d in range(1, num_days + 1):
-        dt = date(year, month, d)
-        days.append(dt.strftime("%Y-%m-%d"))
+def _date_range_days(start_dt: date, end_dt: date) -> list[str]:
+    if end_dt < start_dt:
+        return []
+    days: list[str] = []
+    cur = start_dt
+    while cur <= end_dt:
+        days.append(cur.strftime("%Y-%m-%d"))
+        cur += timedelta(days=1)
     return days
+
+def _current_mtd_days(today: date, lag_days: int) -> list[str]:
+    cutoff = today - timedelta(days=max(1, lag_days))
+    start = date(cutoff.year, cutoff.month, 1)
+    return _date_range_days(start, cutoff)
+
+def _previous_month_days(today: date) -> list[str]:
+    first_of_month = date(today.year, today.month, 1)
+    prev_month_end = first_of_month - timedelta(days=1)
+    prev_month_start = date(prev_month_end.year, prev_month_end.month, 1)
+    return _date_range_days(prev_month_start, prev_month_end)
+
+def resolve_target_days(mode: str, lag_days: int, grace_days: int,
+                        start_date: Optional[str] = None,
+                        end_date: Optional[str] = None) -> Tuple[list[str], str]:
+    """
+    Determine sync window.
+    auto:
+      - Day 1..grace_days -> previous full month
+      - Otherwise -> current month up to (today - lag_days)
+    """
+    if start_date and end_date:
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
+        return _date_range_days(start_dt, end_dt), "custom"
+
+    today = _today_in_sync_timezone()
+    if mode == "previous_month":
+        return _previous_month_days(today), "previous_month"
+    if mode == "current_mtd":
+        return _current_mtd_days(today, lag_days), "current_mtd"
+    if today.day <= max(1, grace_days):
+        return _previous_month_days(today), "previous_month"
+    return _current_mtd_days(today, lag_days), "current_mtd"
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Sync Juggle/platform data to Notion.")
+    parser.add_argument("--mode", choices=["auto", "current_mtd", "previous_month"], default="auto",
+                        help="Sync window mode. auto uses month-close grace logic.")
+    parser.add_argument("--start-date", help="Manual start date (YYYY-MM-DD).")
+    parser.add_argument("--end-date", help="Manual end date (YYYY-MM-DD).")
+    parser.add_argument("--lag-days", type=int, default=SYNC_LAG_DAYS,
+                        help="Lag days from today for current month mode.")
+    parser.add_argument("--month-close-grace-days", type=int, default=SYNC_MONTH_CLOSE_GRACE_DAYS,
+                        help="On these days at month start, auto mode syncs the previous month.")
+    parser.add_argument("--send-email-summary", action="store_true",
+                        help="Send end-of-run summary email.")
+    parser.add_argument("--email-dry-run", action="store_true",
+                        help="Print summary email instead of sending.")
+    return parser.parse_args()
+
+def save_run_snapshot(summary: Dict[str, Any], run_mode: str, target_days: list[str]) -> Optional[str]:
+    if not target_days:
+        return None
+    os.makedirs(SYNC_SNAPSHOT_DIR, exist_ok=True)
+    run_ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    file_name = f"{target_days[0]}_to_{target_days[-1]}_{run_mode}_{run_ts}.json"
+    out_path = os.path.join(SYNC_SNAPSHOT_DIR, file_name)
+    payload = {
+        "generated_at_utc": datetime.utcnow().isoformat() + "Z",
+        "run_mode": run_mode,
+        "period_start": target_days[0],
+        "period_end": target_days[-1],
+        "summary": summary,
+    }
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    return out_path
+
+def send_summary_email(subject: str, body: str, *, smtp_server: str, smtp_port: int,
+                       smtp_username: str, smtp_password: str, use_tls: bool,
+                       from_email: str, to_emails: list[str], dry_run: bool) -> bool:
+    if dry_run:
+        print("\n--- EMAIL TEST (dry-run) ---")
+        print(f"Subject: {subject}")
+        print(body)
+        print("--- END EMAIL TEST ---\n")
+        return True
+
+    if not smtp_server or not from_email or not to_emails:
+        print("Email skipped: missing SMTP/email configuration.")
+        return False
+
+    server = None
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = from_email
+        msg['To'] = ", ".join(to_emails)
+        msg.attach(MIMEText(body, 'plain', 'utf-8'))
+
+        server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
+        if use_tls:
+            server.starttls()
+        if smtp_username and smtp_password:
+            server.login(smtp_username, smtp_password)
+        server.sendmail(from_email, to_emails, msg.as_string())
+        print(f"Email summary sent to {len(to_emails)} recipient(s).")
+        return True
+    except Exception as e:
+        print(f"Email send failed: {e}")
+        return False
+    finally:
+        if server is not None:
+            try:
+                server.quit()
+            except Exception:
+                pass
 
 def request_with_retry(method: str, url: str, *, headers=None, params=None, json_payload=None,
                        timeout: float = REQUEST_TIMEOUT_S, retries: int = 3,
@@ -392,13 +511,21 @@ def has_any_data(day_maps):
     return any(bool(day_map) for day_map in day_maps)
 
 def main():
+    args = parse_args()
+
     if not NOTION_TOKEN:
         print("Missing NOTION_TOKEN")
         sys.exit(1)
             
     mapping = load_sites_mapping()
 
-    target_days = get_days_in_month_until_yesterday()
+    target_days, run_mode = resolve_target_days(
+        mode=args.mode,
+        lag_days=args.lag_days,
+        grace_days=args.month_close_grace_days,
+        start_date=args.start_date,
+        end_date=args.end_date,
+    )
     if not target_days:
         print("No days to sync")
         return
@@ -406,7 +533,7 @@ def main():
     start_date_str = target_days[0]
     end_date_str = target_days[-1]
     
-    print(f"Syncing data for range: {start_date_str} to {end_date_str}")
+    print(f"Syncing data for range: {start_date_str} to {end_date_str} (mode={run_mode})")
     
     if NOTION_DB_ID:
         print(f"Using provided DB ID: {NOTION_DB_ID}")
@@ -419,6 +546,8 @@ def main():
     print(f"Indexed existing Notion rows in range: {len(existing_page_index)}")
 
     synced_sites = 0
+    synced_rows = 0
+    unchanged_rows = 0
     skipped_no_juggle_mapping = []
     skipped_inverter_only = []
     skipped_no_comparison_data = []
@@ -516,6 +645,7 @@ def main():
 
             if existing_record and existing_record.get("fingerprint") == new_fingerprint:
                 print(f"    Unchanged {day_str}: {name}")
+                unchanged_rows += 1
                 wrote_any_rows = True
                 continue
 
@@ -534,6 +664,7 @@ def main():
                 page_id=page_id,
             )
             if ok:
+                synced_rows += 1
                 existing_page_index[page_key] = {
                     "id": page_id or new_page_id,
                     "fingerprint": new_fingerprint,
@@ -544,7 +675,28 @@ def main():
             synced_sites += 1
 
     print("Sync complete.")
-    print(f"Summary: synced_sites={synced_sites}, skipped_no_juggle_mapping={len(skipped_no_juggle_mapping)}, skipped_inverter_only={len(skipped_inverter_only)}, skipped_no_comparison_data={len(skipped_no_comparison_data)}, site_errors={len(site_errors)}")
+    summary = {
+        "mode": run_mode,
+        "range_start": start_date_str,
+        "range_end": end_date_str,
+        "synced_sites": synced_sites,
+        "synced_rows": synced_rows,
+        "unchanged_rows": unchanged_rows,
+        "skipped_no_juggle_mapping": len(skipped_no_juggle_mapping),
+        "skipped_inverter_only": len(skipped_inverter_only),
+        "skipped_no_comparison_data": len(skipped_no_comparison_data),
+        "site_errors": len(site_errors),
+    }
+    print(
+        "Summary: "
+        f"synced_sites={synced_sites}, "
+        f"synced_rows={synced_rows}, "
+        f"unchanged_rows={unchanged_rows}, "
+        f"skipped_no_juggle_mapping={len(skipped_no_juggle_mapping)}, "
+        f"skipped_inverter_only={len(skipped_inverter_only)}, "
+        f"skipped_no_comparison_data={len(skipped_no_comparison_data)}, "
+        f"site_errors={len(site_errors)}"
+    )
     if skipped_no_juggle_mapping:
         print("  No-Juggle-mapping skipped sites:")
         for site in skipped_no_juggle_mapping:
@@ -561,6 +713,40 @@ def main():
         print("  Site errors:")
         for err in site_errors:
             print(f"    - {err}")
+
+    snapshot_path = save_run_snapshot(summary, run_mode, target_days)
+    if snapshot_path:
+        print(f"Saved run snapshot: {snapshot_path}")
+
+    if args.send_email_summary:
+        subject = (
+            f"Notion Sync Summary: {start_date_str} to {end_date_str} "
+            f"({run_mode})"
+        )
+        body = (
+            f"Mode: {run_mode}\n"
+            f"Range: {start_date_str} to {end_date_str}\n"
+            f"Synced sites: {synced_sites}\n"
+            f"Synced rows: {synced_rows}\n"
+            f"Unchanged rows: {unchanged_rows}\n"
+            f"Skipped (no Juggle mapping): {len(skipped_no_juggle_mapping)}\n"
+            f"Skipped (inverter only): {len(skipped_inverter_only)}\n"
+            f"Skipped (no comparison data): {len(skipped_no_comparison_data)}\n"
+            f"Site errors: {len(site_errors)}\n"
+            f"Snapshot: {snapshot_path or 'n/a'}\n"
+        )
+        send_summary_email(
+            subject=subject,
+            body=body,
+            smtp_server=SYNC_SMTP_SERVER,
+            smtp_port=SYNC_SMTP_PORT,
+            smtp_username=SYNC_SMTP_USERNAME,
+            smtp_password=SYNC_SMTP_PASSWORD,
+            use_tls=SYNC_SMTP_USE_TLS,
+            from_email=SYNC_EMAIL_FROM,
+            to_emails=SYNC_EMAIL_TO,
+            dry_run=args.email_dry_run,
+        )
 
 if __name__ == "__main__":
     main()

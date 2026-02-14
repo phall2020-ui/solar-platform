@@ -1,7 +1,7 @@
 """Thermal Loss Analysis – thin Streamlit renderer."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import plotly.graph_objects as go
 import streamlit as st
@@ -45,7 +45,7 @@ def render() -> None:
         )
 
     # ── Run engine ───────────────────────────────────────────────────
-    end = datetime.utcnow()
+    end = datetime.now(UTC)
     start = end - timedelta(days=int(days))
 
     with st.spinner("Running thermal loss analysis…"):

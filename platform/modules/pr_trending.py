@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import plotly.express as px
 import streamlit as st
@@ -31,7 +31,7 @@ def render() -> None:
     with col3:
         window = st.selectbox("Rolling Window", options=[3, 7, 14, 30], index=1)
 
-    end = datetime.utcnow()
+    end = datetime.now(UTC)
     start = end - timedelta(days=int(days))
 
     result = PRTrendingEngine().run(plant_map[name], start, end, rolling_window_days=window)

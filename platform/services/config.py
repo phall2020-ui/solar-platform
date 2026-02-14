@@ -1,15 +1,55 @@
-"""Validated application configuration for Phase 0.
+"""Validated application configuration.
 
-This module is the framework-agnostic source of truth for runtime settings.
+This module is the single source of truth for all runtime settings.
 It loads from `.env`, then environment variables, then code defaults.
 """
 from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Dict, List
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# ── Static constants (no env-var override needed) ──────────────────────────
+
+APP_NAME: str = "\u2600\ufe0f Solar Portfolio Manager"
+APP_VERSION: str = "1.1.0"
+PAGE_TITLE: str = "AMPYR Solar Portfolio Manager"
+PAGE_ICON: str = "\u2600\ufe0f"
+
+BASE_PATH: Path = Path(__file__).resolve().parent.parent  # platform/
+SOLAR_TOOLKIT_PATH: Path = BASE_PATH / "Solar Toolkit"
+MONTHLY_REPORTING_PATH: Path = BASE_PATH / "Monthly reporting"
+
+BRAND_COLORS: Dict[str, str] = {
+    # Core brand
+    "primary": "#5FBFA0",
+    "secondary": "#4A9E80",
+    "accent": "#8FE0C5",
+    # Semantic
+    "positive": "#5FBFA0",
+    "negative": "#E66B6B",
+    "warning": "#F2C265",
+    # Surfaces
+    "surface": "#1E2538",
+    "background": "#0B1120",
+    "border": "#2B354E",
+    # Text
+    "text": "#FFFFFF",
+    "text_secondary": "#E0E0E0",
+}
+
+CHART_COLORS: List[str] = [
+    "#5FBFA0",
+    "#8E44AD",
+    "#5D6D7E",
+    "#4A9E80",
+    "#E66B6B",
+    "#F2C265",
+    "#8FE0C5",
+]
 
 _ALLOWED_ENVIRONMENTS = {"development", "staging", "production"}
 _ALLOWED_LOG_FORMATS = {"console", "json"}
@@ -68,6 +108,14 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     log_format: str = "console"
+
+    # Analysis defaults
+    default_fiscal_start: int = Field(default=4, description="Fiscal year start month (1-12)")
+    target_availability: float = Field(default=99.0)
+    default_pr_budget: float = Field(default=79.0)
+    default_fouling_clean_days: int = Field(default=3)
+    default_shading_baseline_months: List[str] = Field(default=["06", "07", "08"])
+    default_shading_compare_months: List[str] = Field(default=["10", "11", "12"])
 
     # Auth and integrations (future-safe)
     jwt_secret_key: str = "change-me-in-production"

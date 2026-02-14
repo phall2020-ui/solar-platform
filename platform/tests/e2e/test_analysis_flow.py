@@ -123,7 +123,7 @@ class TestThermalAnalysisFlow:
             datetime(2026, 1, 31, tzinfo=timezone.utc),
         )
         assert isinstance(result, AnalysisResult)
-        assert result.analysis_type == "thermal_loss"
+        assert result.analysis_type == "thermal"
         assert result.plant_uid == "uid-001"
 
 

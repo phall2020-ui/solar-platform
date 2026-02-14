@@ -31,3 +31,25 @@ jobs/inverter-daily-checks/token.json
 
 # Keep irradiation datasets versioned
 !tools/irradiation-data/**/*.csv
+
+# DuckDB databases
+*.duckdb
+*.duckdb.wal
+
+# Private keys
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Google/OAuth credential files (repo-wide)
+client_secret*.json
+service_account*.json
+
+# Config files with secrets
+config.yaml
+config.yml
+
+# Environment files (defense in depth)
+.env
+**/.env

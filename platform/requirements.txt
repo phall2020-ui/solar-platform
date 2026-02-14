@@ -19,6 +19,9 @@ structlog>=23.1.0
 pyarrow>=14.0.0  # For parquet export
 fastparquet>=2023.10.0  # Alternative parquet engine
 
+# PDF Generation
+reportlab>=4.0.0
+
 # API and Security
 bcrypt>=4.0.0  # For secure password hashing (bcrypt)
 cryptography>=41.0.0  # For encryption utilities
@@ -31,6 +34,6 @@ pytz>=2023.3
 # Database
 duckdb>=1.0.0
 
-# Already satisfied by existing apps:
-# - All Solar Toolkit dependencies
-# - All Monthly Reporting dependencies
+# Search
+fuzzywuzzy>=0.18.0
+python-Levenshtein>=0.25.0
