@@ -2,7 +2,7 @@ import requests
 import json
 import os
 
-NOTION_TOKEN = "ntn_T62952956806aoQrHpKS8stIuHcWDsxx7zUY0yF7QHZ41d"
+NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
 # The script output log didn't print the DB ID explicitly, so we must find it again.
 HEADERS = {
     "Authorization": f"Bearer {NOTION_TOKEN}",

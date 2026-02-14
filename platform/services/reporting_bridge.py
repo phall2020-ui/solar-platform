@@ -10,7 +10,6 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 # Observability
-from services.config import get_settings as _get_config_settings
 from services.db_utils import get_connection as _db_get_connection
 from services.observability import get_logger
 
@@ -84,7 +83,8 @@ class ReportingBridge:
         """
         # Use the unified DuckDB database
         if db_path is None:
-            self.db_path = str(_get_config_settings().db_path)
+            from services.config import get_settings
+            self.db_path = str(get_settings().db_path)
         else:
             self.db_path = db_path
         self.extractor = None
@@ -309,6 +309,12 @@ class ReportingBridge:
 
     def _get_table_columns(self, table_name: str) -> set:
         """Return the set of column names for a table."""
+        # Validate table_name against actual tables in the database
+        allowed_tables = self.get_tables()
+        if table_name not in allowed_tables:
+            self.logger.warning("_get_table_columns rejected invalid table name: %s", table_name)
+            return set()
+
         try:
             success, df = self.extractor.query_data(
                 f"SELECT column_name AS name FROM information_schema.columns WHERE table_name = '{table_name}'"

@@ -50,6 +50,13 @@ PAGE_GROUPS: dict[str, PageGroup] = {
                 roles=["viewer", "engineer", "manager", "admin"],
                 description="Real-time site monitoring",
             ),
+            "Live Site Data": PageConfig(
+                module="modules.live_site_data",
+                func="render",
+                icon="📊",
+                roles=["viewer", "engineer", "manager", "admin"],
+                description="Live generation data with historical day view",
+            ),
 
         },
     ),

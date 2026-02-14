@@ -31,8 +31,8 @@ if sys.stdout.encoding != "utf-8":
 # ---------------------------------------------------------------------------
 
 SOLIS_API_URL = os.environ.get("SOLIS_API_URL") or "https://www.soliscloud.com:13333"
-SOLIS_KEY_ID = os.environ.get("SOLIS_KEY_ID") or "1300386381677701029"
-SOLIS_KEY_SECRET = os.environ.get("SOLIS_KEY_SECRET") or "dae233aa6c484de59fff0aa73c126cbf"
+SOLIS_KEY_ID = os.environ.get("SOLIS_KEY_ID", "")
+SOLIS_KEY_SECRET = os.environ.get("SOLIS_KEY_SECRET", "")
 
 # ---------------------------------------------------------------------------
 # HMAC Authentication

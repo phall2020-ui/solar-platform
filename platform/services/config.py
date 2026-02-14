@@ -1,58 +1,51 @@
-"""Validated application configuration.
+"""Validated application configuration for Phase 0.
 
-This module is the single source of truth for all runtime settings.
+This module is the framework-agnostic source of truth for runtime settings.
 It loads from `.env`, then environment variables, then code defaults.
 """
 from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-# ── Static constants (no env-var override needed) ──────────────────────────
-
-APP_NAME: str = "\u2600\ufe0f Solar Portfolio Manager"
-APP_VERSION: str = "1.1.0"
-PAGE_TITLE: str = "AMPYR Solar Portfolio Manager"
-PAGE_ICON: str = "\u2600\ufe0f"
-
-BASE_PATH: Path = Path(__file__).resolve().parent.parent  # platform/
-SOLAR_TOOLKIT_PATH: Path = BASE_PATH / "Solar Toolkit"
-MONTHLY_REPORTING_PATH: Path = BASE_PATH / "Monthly reporting"
-
-BRAND_COLORS: Dict[str, str] = {
-    # Core brand
-    "primary": "#5FBFA0",
-    "secondary": "#4A9E80",
-    "accent": "#8FE0C5",
-    # Semantic
-    "positive": "#5FBFA0",
-    "negative": "#E66B6B",
-    "warning": "#F2C265",
-    # Surfaces
-    "surface": "#1E2538",
-    "background": "#0B1120",
-    "border": "#2B354E",
-    # Text
-    "text": "#FFFFFF",
-    "text_secondary": "#E0E0E0",
-}
-
-CHART_COLORS: List[str] = [
-    "#5FBFA0",
-    "#8E44AD",
-    "#5D6D7E",
-    "#4A9E80",
-    "#E66B6B",
-    "#F2C265",
-    "#8FE0C5",
-]
 
 _ALLOWED_ENVIRONMENTS = {"development", "staging", "production"}
 _ALLOWED_LOG_FORMATS = {"console", "json"}
+
+# ── Module-level constants (non-env, static) ─────────────────────────
+APP_NAME: str = "☀️ Solar Portfolio Manager"
+APP_VERSION: str = "2.0.0"
+PAGE_TITLE: str = "Solar Portfolio Manager"
+PAGE_ICON: str = "☀️"
+BASE_PATH: Path = Path(__file__).resolve().parent.parent
+SOLAR_TOOLKIT_PATH: Path = BASE_PATH / "Solar Toolkit"
+MONTHLY_REPORTING_PATH: Path = BASE_PATH / "Monthly reporting"
+
+BRAND_COLORS: dict[str, str] = {
+    "primary": "#5FBFA0",
+    "secondary": "#1B4D5C",
+    "accent": "#2ECC71",
+    "positive": "#2ECC71",
+    "negative": "#E74C3C",
+    "warning": "#F39C12",
+    "danger": "#E74C3C",
+    "info": "#3498DB",
+    "dark": "#34495E",
+    "light": "#ECF0F1",
+    "surface": "#FFFFFF",
+    "background": "#F8F9FA",
+    "border": "#DEE2E6",
+    "text": "#2C3E50",
+    "text_secondary": "#7F8C8D",
+}
+
+CHART_COLORS: list[str] = [
+    "#5FBFA0", "#1B4D5C", "#2ECC71", "#F39C12", "#E74C3C",
+    "#3498DB", "#9B59B6", "#1ABC9C", "#E67E22", "#95A5A6",
+    "#34495E", "#16A085",
+]
 
 
 class Settings(BaseSettings):
@@ -109,16 +102,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_format: str = "console"
 
-    # Analysis defaults
-    default_fiscal_start: int = Field(default=4, description="Fiscal year start month (1-12)")
-    target_availability: float = Field(default=99.0)
-    default_pr_budget: float = Field(default=79.0)
-    default_fouling_clean_days: int = Field(default=3)
-    default_shading_baseline_months: List[str] = Field(default=["06", "07", "08"])
-    default_shading_compare_months: List[str] = Field(default=["10", "11", "12"])
-
     # Auth and integrations (future-safe)
-    jwt_secret_key: str = "change-me-in-production"
+    jwt_secret_key: str = ""
     default_admin_password: str = ""
     smtp_host: str = ""
     smtp_port: int = 587
@@ -126,6 +111,14 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = "noreply@ampyr.com"
     slack_webhook_url: str = ""
+
+    # Analysis defaults
+    default_fiscal_start: int = Field(default=4, description="Fiscal year start month (1-12)")
+    target_availability: float = Field(default=97.0, description="Target availability %")
+    default_pr_budget: float = Field(default=80.0, description="Default PR budget %")
+    default_fouling_clean_days: int = Field(default=90, description="Days between fouling cleans")
+    default_shading_baseline_months: int = Field(default=3, description="Shading baseline months")
+    default_shading_compare_months: int = Field(default=1, description="Shading comparison months")
 
     @field_validator("environment")
     @classmethod
@@ -144,6 +137,16 @@ class Settings(BaseSettings):
             allowed = ", ".join(sorted(_ALLOWED_LOG_FORMATS))
             raise ValueError(f"log_format must be one of: {allowed}")
         return normalized
+
+    @model_validator(mode="after")
+    def validate_jwt_secret_in_production(self) -> "Settings":
+        if self.environment == "production" and (
+            not self.jwt_secret_key or self.jwt_secret_key == "change-me-in-production"
+        ):
+            raise ValueError(
+                "jwt_secret_key must be set to a secure value in production"
+            )
+        return self
 
     @field_validator("log_level")
     @classmethod

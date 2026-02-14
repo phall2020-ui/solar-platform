@@ -2,7 +2,7 @@ import requests
 import os
 from datetime import datetime, timedelta
 
-NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "ntn_T62952956806aoQrHpKS8stIuHcWDsxx7zUY0yF7QHZ41d")
+NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
 HEADERS = {
     "Authorization": f"Bearer {NOTION_TOKEN}",
     "Content-Type": "application/json",

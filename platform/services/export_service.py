@@ -335,22 +335,28 @@ class TemplateExports:
         sheets = {}
 
         # Plant details
-        query = f"SELECT * FROM plants WHERE plant_id = '{plant_id}'"
         try:
-            sheets['Plant Info'] = pd.read_sql_query(query, conn)
+            sheets['Plant Info'] = pd.read_sql_query(
+                "SELECT * FROM plants WHERE plant_id = ?",
+                conn,
+                params=(plant_id,),
+            )
         except Exception:
             pass
 
         # Recent performance
-        query = f"""
-            SELECT date, energy_kwh, pr, availability
-            FROM daily_performance
-            WHERE plant_id = '{plant_id}'
-            ORDER BY date DESC
-            LIMIT 90
-        """
         try:
-            sheets['Recent Performance'] = pd.read_sql_query(query, conn)
+            sheets['Recent Performance'] = pd.read_sql_query(
+                """
+                SELECT date, energy_kwh, pr, availability
+                FROM daily_performance
+                WHERE plant_id = ?
+                ORDER BY date DESC
+                LIMIT 90
+                """,
+                conn,
+                params=(plant_id,),
+            )
         except Exception:
             pass
 

@@ -2,10 +2,11 @@
 Verify Notion DB contents — paginated query of all rows,
 grouped by date, showing counts and sample values.
 """
+import os
 import requests, json, sys
 from collections import defaultdict
 
-NOTION_TOKEN = "ntn_T62952956806aoQrHpKS8stIuHcWDsxx7zUY0yF7QHZ41d"
+NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
 HEADERS = {
     "Authorization": f"Bearer {NOTION_TOKEN}",
     "Content-Type": "application/json",
