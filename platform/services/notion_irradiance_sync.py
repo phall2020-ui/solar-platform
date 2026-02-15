@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -45,6 +46,10 @@ DB_PROPERTIES: dict[str, dict] = {
     "Forecast Irradiance (kWh/m²)": {"number": {"format": "number"}},
     "SolarGIS GTI (kWh/m²)":        {"number": {"format": "number"}},
     "SolarGIS GHI (kWh/m²)":        {"number": {"format": "number"}},
+    "LT Region":                    {"rich_text": {}},
+    "LT GHI (kWh/m²)":              {"number": {"format": "number"}},
+    "LT Annual GHI (kWh/m²)":       {"number": {"format": "number"}},
+    "SolarGIS GHI vs LT (%)":       {"number": {"format": "percent"}},
     "SG vs Actual (%)":             {"number": {"format": "percent"}},
     "Irr Variance (%)":             {"number": {"format": "percent"}},
     "Actual Gen (kWh)":             {"number": {"format": "number"}},
@@ -54,6 +59,188 @@ DB_PROPERTIES: dict[str, dict] = {
     "Actual PR (%)":                {"number": {"format": "percent"}},
     "Availability (%)":             {"number": {"format": "percent"}},
 }
+
+# ── Long-term irradiance (GHI) reference ────────────────────────────────
+
+_LT_GHI_KWH_M2: dict[str, dict[str, float]] = {
+    # Monthly long-term (LT) GHI by region (kWh/m²)
+    "Midlands": {
+        "Jan": 24.7,
+        "Feb": 45.3,
+        "Mar": 83.4,
+        "Apr": 123.5,
+        "May": 150.3,
+        "Jun": 142.1,
+        "Jul": 144.1,
+        "Aug": 120.4,
+        "Sep": 90.6,
+        "Oct": 56.6,
+        "Nov": 29.9,
+        "Dec": 19.6,
+        "Total": 1030.5,
+    },
+    "North England": {
+        "Jan": 23.2,
+        "Feb": 42.5,
+        "Mar": 78.1,
+        "Apr": 115.8,
+        "May": 140.9,
+        "Jun": 133.1,
+        "Jul": 135.1,
+        "Aug": 112.9,
+        "Sep": 84.9,
+        "Oct": 53.1,
+        "Nov": 28.0,
+        "Dec": 18.3,
+        "Total": 965.7,
+    },
+    "Scotland": {
+        "Jan": 21.1,
+        "Feb": 38.7,
+        "Mar": 71.3,
+        "Apr": 105.6,
+        "May": 128.5,
+        "Jun": 121.4,
+        "Jul": 123.2,
+        "Aug": 103.0,
+        "Sep": 77.4,
+        "Oct": 48.4,
+        "Nov": 25.5,
+        "Dec": 16.7,
+        "Total": 880.9,
+    },
+}
+
+# Optional overrides for region assignment by site name.
+# Keys are normalised (see _site_key()).
+_SITE_LT_REGION_OVERRIDES: dict[str, str] = {}
+
+# Latitude thresholds for rough UK region assignment.
+# This is intentionally simple and can be adjusted as needed.
+_LT_SCOTLAND_LAT_MIN = 55.5
+_LT_NORTH_ENGLAND_LAT_MIN = 53.3
+
+_SITE_LAT_LOOKUP: dict[str, float] | None = None
+
+
+# ── LT helpers ──────────────────────────────────────────────────────────
+
+def _site_key(value: Any) -> str:
+    """Normalise a site name into a stable key for lookups."""
+    if value is None:
+        return ""
+    s = str(value).strip()
+    # Normalise common spreadsheet markers.
+    s = s.rstrip("*").strip()
+    s = s.casefold()
+    # Keep only alphanumerics to avoid punctuation/whitespace mismatches.
+    return re.sub(r"[^a-z0-9]+", "", s)
+
+
+def _month_abbr_from_label(month_label: Any) -> str | None:
+    """Extract month abbreviation from labels like 'Jan-26'."""
+    if month_label is None:
+        return None
+    s = str(month_label).strip()
+    if not s:
+        return None
+    # Expected format is 'Mon-YY', but handle 'Mon YY' too.
+    m = re.match(r"^([A-Za-z]{3})[-\s]\d{2}$", s)
+    if not m:
+        return None
+    return m.group(1).title()
+
+
+def _get_site_lat_lookup() -> dict[str, float]:
+    """Load site → latitude lookup from tools/irradiation-data/site_summary.csv."""
+    global _SITE_LAT_LOOKUP
+    if _SITE_LAT_LOOKUP is not None:
+        return _SITE_LAT_LOOKUP
+
+    repo_root = Path(__file__).resolve().parents[2]
+    site_summary = repo_root / "tools" / "irradiation-data" / "site_summary.csv"
+    lookup: dict[str, float] = {}
+
+    try:
+        import pandas as pd
+        df = pd.read_csv(site_summary)
+        if "Site Name" not in df.columns or "Latitude" not in df.columns:
+            _SITE_LAT_LOOKUP = {}
+            return _SITE_LAT_LOOKUP
+        for _, r in df.iterrows():
+            name = r.get("Site Name")
+            lat = r.get("Latitude")
+            try:
+                if name is None or lat is None:
+                    continue
+                if lat != lat:  # NaN
+                    continue
+                key = _site_key(name)
+                if key:
+                    lookup[key] = float(lat)
+            except Exception:
+                continue
+    except Exception:
+        lookup = {}
+
+    _SITE_LAT_LOOKUP = lookup
+    return _SITE_LAT_LOOKUP
+
+
+def _infer_lt_region(site: Any, latitude: float | None) -> str | None:
+    """Infer which LT region bucket a site should use."""
+    site_override = _SITE_LT_REGION_OVERRIDES.get(_site_key(site))
+    if site_override:
+        return site_override
+
+    if latitude is None:
+        return None
+    if latitude >= _LT_SCOTLAND_LAT_MIN:
+        return "Scotland"
+    if latitude >= _LT_NORTH_ENGLAND_LAT_MIN:
+        return "North England"
+    return "Midlands"
+
+
+def _compute_lt_fields(
+    *,
+    site: Any,
+    month_label: Any,
+    solargis_ghi: float | None = None,
+) -> dict[str, Any]:
+    """Compute LT fields for a given site + month label.
+
+    Returns dict with keys:
+      lt_region, lt_ghi, lt_annual_ghi, sg_ghi_vs_lt_pct
+    """
+    month_abbr = _month_abbr_from_label(month_label)
+    lat_lookup = _get_site_lat_lookup()
+    lat = lat_lookup.get(_site_key(site))
+    region = _infer_lt_region(site, lat)
+
+    lt_ghi = None
+    lt_annual = None
+    if region and month_abbr and region in _LT_GHI_KWH_M2:
+        lt_ghi = _LT_GHI_KWH_M2[region].get(month_abbr)
+        lt_annual = _LT_GHI_KWH_M2[region].get("Total")
+
+    sg_ghi_vs_lt = None
+    if (
+        solargis_ghi is not None
+        and lt_ghi is not None
+        and lt_ghi > 0
+    ):
+        try:
+            sg_ghi_vs_lt = (float(solargis_ghi) - float(lt_ghi)) / float(lt_ghi)
+        except Exception:
+            sg_ghi_vs_lt = None
+
+    return {
+        "lt_region": region,
+        "lt_ghi": lt_ghi,
+        "lt_annual_ghi": lt_annual,
+        "sg_ghi_vs_lt_pct": sg_ghi_vs_lt,
+    }
 
 
 # ── HTTP helpers ────────────────────────────────────────────────────────
@@ -223,6 +410,11 @@ def _build_properties(row: dict[str, Any]) -> dict[str, Any]:
         "rich_text": [{"text": {"content": str(row.get("Month", ""))}}]
     }
 
+    # Rich text (LT Region)
+    lt_region = row.get("lt_region")
+    if lt_region:
+        props["LT Region"] = {"rich_text": [{"text": {"content": str(lt_region)}}]}
+
     # Number fields
     number_map = {
         "kWp":                          "kWp",
@@ -235,9 +427,18 @@ def _build_properties(row: dict[str, Any]) -> dict[str, Any]:
         "kWh/kWp":                      "kwh_per_kwp",
         "SolarGIS GTI (kWh/m²)":        "solargis_gti",
         "SolarGIS GHI (kWh/m²)":        "solargis_ghi",
+        "LT GHI (kWh/m²)":              "lt_ghi",
+        "LT Annual GHI (kWh/m²)":       "lt_annual_ghi",
+        "SolarGIS GHI vs LT (%)":       "sg_ghi_vs_lt_pct",
         "SG vs Actual (%)":             "sg_vs_actual_pct",
         "Actual PR (%)":                "actual_pr",
         "Availability (%)":             "availability",
+    }
+
+    lt_optional_cols = {
+        "LT GHI (kWh/m²)",
+        "LT Annual GHI (kWh/m²)",
+        "SolarGIS GHI vs LT (%)",
     }
 
     for notion_col, data_key in number_map.items():
@@ -245,6 +446,10 @@ def _build_properties(row: dict[str, Any]) -> dict[str, Any]:
         if val is not None and val == val:  # skip NaN
             props[notion_col] = {"number": round(float(val), 4)}
         else:
+            # For LT fields, avoid clearing values if we couldn't infer them.
+            # This lets manual Notion overrides survive future sync runs.
+            if notion_col in lt_optional_cols:
+                continue
             props[notion_col] = {"number": None}
 
     return props
@@ -280,22 +485,59 @@ def load_irradiance_data() -> list[dict[str, Any]]:
     finally:
         conn.close()
 
-    # Load SolarGIS 15-min aggregated data
+    # Filter out non-site rollups that appear in some spreadsheets.
+    # Keep this logic here (rather than mutating DuckDB) so we don't risk breaking
+    # other reporting workflows that may rely on these rows.
+    if not df.empty and "Site" in df.columns:
+        df["Site"] = df["Site"].astype(str).str.strip()
+        df = df[~df["Site"].str.lower().isin({"summary", "oasis"})]
+
+    # Load SolarGIS monthly aggregates.
+    #
+    # Prefer DuckDB table "solargis_monthly" if present (fast, explicit refresh),
+    # otherwise fall back to on-the-fly aggregation from CSVs.
+    sg_lookup: dict[tuple[str, str], dict] = {}
     try:
-        sg_df = aggregate_solargis_monthly()
-        sg_lookup: dict[tuple[str, str], dict] = {}
-        for _, sg in sg_df.iterrows():
-            sg_lookup[(sg["Site"], sg["Month"])] = {
-                "solargis_gti": sg["SolarGIS GTI (kWh/m²)"],
-                "solargis_ghi": sg["SolarGIS GHI (kWh/m²)"],
+        conn = duckdb.connect(db_path, read_only=True)
+        try:
+            sg = conn.execute(
+                """
+                SELECT
+                    site AS Site,
+                    month AS Month,
+                    solargis_gti_kwh_m2 AS solargis_gti,
+                    solargis_ghi_kwh_m2 AS solargis_ghi
+                FROM solargis_monthly
+                """
+            ).fetchdf()
+        finally:
+            conn.close()
+
+        for _, r in sg.iterrows():
+            sg_lookup[(r["Site"], r["Month"])] = {
+                "solargis_gti": r["solargis_gti"],
+                "solargis_ghi": r["solargis_ghi"],
             }
-        print(f"  Loaded {len(sg_lookup)} SolarGIS site-months")
-    except Exception as exc:
-        print(f"  WARN: SolarGIS data unavailable: {exc}")
-        sg_lookup = {}
+        print(f"  Loaded {len(sg_lookup)} SolarGIS site-months from DuckDB")
+    except Exception:
+        try:
+            sg_df = aggregate_solargis_monthly()
+            for _, sg in sg_df.iterrows():
+                sg_lookup[(sg["Site"], sg["Month"])] = {
+                    "solargis_gti": sg["SolarGIS GTI (kWh/m²)"],
+                    "solargis_ghi": sg["SolarGIS GHI (kWh/m²)"],
+                }
+            print(f"  Loaded {len(sg_lookup)} SolarGIS site-months from CSVs")
+        except Exception as exc:
+            print(f"  WARN: SolarGIS data unavailable: {exc}")
+            sg_lookup = {}
 
     rows: list[dict[str, Any]] = []
     for _, r in df.iterrows():
+        site_raw = str(r["Site"]).strip()
+        # Normalize for SolarGIS lookup only (keep raw site label for Notion key).
+        site_lookup = site_raw.rstrip("*").strip()
+
         actual_irr = r["actual_irr"] if r["actual_irr"] == r["actual_irr"] else None
         forecast_irr = r["forecast_irr"] if r["forecast_irr"] == r["forecast_irr"] else None
 
@@ -322,9 +564,11 @@ def load_irradiance_data() -> list[dict[str, Any]]:
             avail = avail / 100.0
 
         # Merge SolarGIS data
-        sg = sg_lookup.get((r["Site"], r["Date"]), {})
+        sg = sg_lookup.get((site_lookup, r["Date"]), {})
         sg_gti = sg.get("solargis_gti")
         sg_ghi = sg.get("solargis_ghi")
+
+        lt = _compute_lt_fields(site=site_lookup, month_label=r["Date"], solargis_ghi=sg_ghi)
 
         # SolarGIS vs Actual variance
         sg_vs_actual = None
@@ -332,13 +576,17 @@ def load_irradiance_data() -> list[dict[str, Any]]:
             sg_vs_actual = (sg_gti - actual_irr) / actual_irr
 
         rows.append({
-            "Site": r["Site"],
+            "Site": site_raw,
             "Month": r["Date"],  # e.g. "Apr-25"
             "kWp": r["kWp"] if r["kWp"] == r["kWp"] else None,
             "actual_irr": actual_irr,
             "forecast_irr": forecast_irr,
             "solargis_gti": sg_gti,
             "solargis_ghi": sg_ghi,
+            "lt_region": lt.get("lt_region"),
+            "lt_ghi": lt.get("lt_ghi"),
+            "lt_annual_ghi": lt.get("lt_annual_ghi"),
+            "sg_ghi_vs_lt_pct": lt.get("sg_ghi_vs_lt_pct"),
             "sg_vs_actual_pct": sg_vs_actual,
             "irr_variance_pct": irr_var,
             "actual_gen": actual_gen,
@@ -350,6 +598,116 @@ def load_irradiance_data() -> list[dict[str, Any]]:
         })
 
     return rows
+
+
+# ── LT-only Notion updater ───────────────────────────────────────────────
+
+def update_lt_fields_in_notion(*, dry_run: bool = False) -> dict[str, int]:
+    """Update LT (long-term) GHI fields on existing Notion rows.
+
+    This path does NOT read DuckDB. It only:
+      1) Ensures LT columns exist in the Notion DB schema
+      2) Iterates existing pages and patches LT properties based on (Site, Month)
+    """
+    settings = get_settings()
+    token = settings.notion_integration_token
+    db_id = settings.notion_irradiance_database_id
+
+    if not token:
+        print("ERROR: NOTION_INTEGRATION_TOKEN not set")
+        return {"error": "no token"}  # type: ignore[return-value]
+    if not db_id:
+        print("ERROR: NOTION_IRRADIANCE_DATABASE_ID not set")
+        return {"error": "no db id"}  # type: ignore[return-value]
+
+    ensure_schema(token, db_id)
+
+    updated = 0
+    skipped = 0
+    total = 0
+    missing_region: set[str] = set()
+
+    cursor: str | None = None
+    while True:
+        payload: dict[str, Any] = {"page_size": _PAGE_SIZE}
+        if cursor:
+            payload["start_cursor"] = cursor
+
+        body = _request(
+            "POST", f"{_API}/databases/{db_id}/query", token, json_body=payload
+        )
+
+        for page in body.get("results", []):
+            total += 1
+            props = page.get("properties", {}) or {}
+
+            site_parts = props.get("Site", {}).get("title", [])
+            site = site_parts[0].get("plain_text", "") if site_parts else ""
+            month_parts = props.get("Month", {}).get("rich_text", [])
+            month = month_parts[0].get("plain_text", "") if month_parts else ""
+
+            if not site or not month:
+                skipped += 1
+                continue
+
+            sg_ghi = props.get("SolarGIS GHI (kWh/m²)", {}).get("number")
+            if sg_ghi is not None and sg_ghi != sg_ghi:  # NaN
+                sg_ghi = None
+
+            lt = _compute_lt_fields(site=site, month_label=month, solargis_ghi=sg_ghi)
+            region = lt.get("lt_region")
+            if not region:
+                missing_region.add(site)
+                skipped += 1
+                continue
+
+            patch_props: dict[str, Any] = {
+                "LT Region": {"rich_text": [{"text": {"content": str(region)}}]},
+            }
+
+            for notion_col, key in (
+                ("LT GHI (kWh/m²)", "lt_ghi"),
+                ("LT Annual GHI (kWh/m²)", "lt_annual_ghi"),
+                ("SolarGIS GHI vs LT (%)", "sg_ghi_vs_lt_pct"),
+            ):
+                val = lt.get(key)
+                if val is None or val != val:  # None / NaN
+                    continue
+                patch_props[notion_col] = {"number": round(float(val), 4)}
+
+            if dry_run:
+                print(f"  [LT] would update {site:40s} {month:8s}  region={region}")
+                updated += 1
+            else:
+                try:
+                    _request(
+                        "PATCH",
+                        f"{_API}/pages/{page['id']}",
+                        token,
+                        json_body={"properties": patch_props},
+                    )
+                    updated += 1
+                except Exception as exc:
+                    print(f"  [LT] FAILED {site} {month}: {exc}")
+                    skipped += 1
+
+            # Light rate-limit: Notion allows ~3 req/s
+            if total % 3 == 0:
+                time.sleep(0.4)
+
+        if not body.get("has_more"):
+            break
+        cursor = body.get("next_cursor")
+        if not cursor:
+            break
+
+    print(f"\nLT update: {updated} updated, {skipped} skipped (total pages scanned: {total})")
+    if missing_region:
+        missing_list = ", ".join(sorted(missing_region))
+        print(f"  WARN: Could not infer LT region for {len(missing_region)} sites: {missing_list}")
+        print("        Add lat/long to tools/irradiation-data/site_summary.csv or set _SITE_LT_REGION_OVERRIDES.")
+
+    return {"total": total, "updated": updated, "skipped": skipped}
 
 
 # ── Orchestrator ─────────────────────────────────────────────────────────
@@ -454,9 +812,17 @@ def _append_env(key: str, value: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync monthly irradiance data to Notion")
     parser.add_argument("--dry-run", action="store_true", help="Preview without writing to Notion")
+    parser.add_argument(
+        "--lt-only",
+        action="store_true",
+        help="Update LT GHI fields on existing Notion rows (does not read DuckDB)",
+    )
     args = parser.parse_args()
 
-    result = sync_irradiance_to_notion(dry_run=args.dry_run)
+    if args.lt_only:
+        result = update_lt_fields_in_notion(dry_run=args.dry_run)
+    else:
+        result = sync_irradiance_to_notion(dry_run=args.dry_run)
     if "error" in result:
         sys.exit(1)
 
