@@ -74,7 +74,6 @@ solar_platform.egg-info/requires.txt
 solar_platform.egg-info/top_level.txt
 src/solar_platform/__init__.py
 src/solar_platform/config.py
-src/solar_platform/constants.py
 src/solar_platform/models.py
 src/solar_platform/alerts/__init__.py
 src/solar_platform/alerts/default_rules.py
