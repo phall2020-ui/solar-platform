@@ -280,22 +280,59 @@ def load_irradiance_data() -> list[dict[str, Any]]:
     finally:
         conn.close()
 
-    # Load SolarGIS 15-min aggregated data
+    # Filter out non-site rollups that appear in some spreadsheets.
+    # Keep this logic here (rather than mutating DuckDB) so we don't risk breaking
+    # other reporting workflows that may rely on these rows.
+    if not df.empty and "Site" in df.columns:
+        df["Site"] = df["Site"].astype(str).str.strip()
+        df = df[~df["Site"].str.lower().isin({"summary", "oasis"})]
+
+    # Load SolarGIS monthly aggregates.
+    #
+    # Prefer DuckDB table "solargis_monthly" if present (fast, explicit refresh),
+    # otherwise fall back to on-the-fly aggregation from CSVs.
+    sg_lookup: dict[tuple[str, str], dict] = {}
     try:
-        sg_df = aggregate_solargis_monthly()
-        sg_lookup: dict[tuple[str, str], dict] = {}
-        for _, sg in sg_df.iterrows():
-            sg_lookup[(sg["Site"], sg["Month"])] = {
-                "solargis_gti": sg["SolarGIS GTI (kWh/m²)"],
-                "solargis_ghi": sg["SolarGIS GHI (kWh/m²)"],
+        conn = duckdb.connect(db_path, read_only=True)
+        try:
+            sg = conn.execute(
+                """
+                SELECT
+                    site AS Site,
+                    month AS Month,
+                    solargis_gti_kwh_m2 AS solargis_gti,
+                    solargis_ghi_kwh_m2 AS solargis_ghi
+                FROM solargis_monthly
+                """
+            ).fetchdf()
+        finally:
+            conn.close()
+
+        for _, r in sg.iterrows():
+            sg_lookup[(r["Site"], r["Month"])] = {
+                "solargis_gti": r["solargis_gti"],
+                "solargis_ghi": r["solargis_ghi"],
             }
-        print(f"  Loaded {len(sg_lookup)} SolarGIS site-months")
-    except Exception as exc:
-        print(f"  WARN: SolarGIS data unavailable: {exc}")
-        sg_lookup = {}
+        print(f"  Loaded {len(sg_lookup)} SolarGIS site-months from DuckDB")
+    except Exception:
+        try:
+            sg_df = aggregate_solargis_monthly()
+            for _, sg in sg_df.iterrows():
+                sg_lookup[(sg["Site"], sg["Month"])] = {
+                    "solargis_gti": sg["SolarGIS GTI (kWh/m²)"],
+                    "solargis_ghi": sg["SolarGIS GHI (kWh/m²)"],
+                }
+            print(f"  Loaded {len(sg_lookup)} SolarGIS site-months from CSVs")
+        except Exception as exc:
+            print(f"  WARN: SolarGIS data unavailable: {exc}")
+            sg_lookup = {}
 
     rows: list[dict[str, Any]] = []
     for _, r in df.iterrows():
+        site_raw = str(r["Site"]).strip()
+        # Normalize for SolarGIS lookup only (keep raw site label for Notion key).
+        site_lookup = site_raw.rstrip("*").strip()
+
         actual_irr = r["actual_irr"] if r["actual_irr"] == r["actual_irr"] else None
         forecast_irr = r["forecast_irr"] if r["forecast_irr"] == r["forecast_irr"] else None
 
@@ -322,7 +359,7 @@ def load_irradiance_data() -> list[dict[str, Any]]:
             avail = avail / 100.0
 
         # Merge SolarGIS data
-        sg = sg_lookup.get((r["Site"], r["Date"]), {})
+        sg = sg_lookup.get((site_lookup, r["Date"]), {})
         sg_gti = sg.get("solargis_gti")
         sg_ghi = sg.get("solargis_ghi")
 
@@ -332,7 +369,7 @@ def load_irradiance_data() -> list[dict[str, Any]]:
             sg_vs_actual = (sg_gti - actual_irr) / actual_irr
 
         rows.append({
-            "Site": r["Site"],
+            "Site": site_raw,
             "Month": r["Date"],  # e.g. "Apr-25"
             "kWp": r["kWp"] if r["kWp"] == r["kWp"] else None,
             "actual_irr": actual_irr,

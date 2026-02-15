@@ -6,6 +6,8 @@ monthly GTI (POA)** for each site, and returns a DataFrame that can be
 merged into the Notion irradiance database alongside the existing
 ``solar_data`` actuals / forecasts.
 
+Optionally, you can persist the results to DuckDB for faster downstream joins.
+
 The capacity-weighted formula is::
 
     POA_site = Σ(GTI_array_i × Cap_array_i) / Σ(Cap_array_i)
@@ -51,6 +53,9 @@ _MONTH_FMT = {
 _SITE_NAME_OVERRIDES: dict[str, str] = {
     "Smithy's Mushrooms": "Smithys Mushrooms",
     "Smithy's Mushrooms Phase 2": "Smithys Mushrooms Phase 2",
+    # Some months use this filename form (underscores → spaces).
+    "Smithy s Mushrooms": "Smithys Mushrooms",
+    "Smithy s Mushrooms Phase 2": "Smithys Mushrooms Phase 2",
 }
 
 
@@ -77,7 +82,11 @@ def _folder_to_month_label(folder_name: str) -> str | None:
     return f"{abbr}-{year[2:]}"
 
 
-def _compute_site_monthly_poa(csv_path: Path) -> dict[str, Any]:
+def _compute_site_monthly_poa(
+    csv_path: Path,
+    *,
+    month_prefix: str | None = None,
+) -> dict[str, Any] | None:
     """Read one SolarGIS CSV and compute capacity-weighted monthly GTI.
 
     The CSV has one row **per inverter per timestamp**.  Multiple inverters
@@ -92,6 +101,16 @@ def _compute_site_monthly_poa(csv_path: Path) -> dict[str, Any]:
         site, solargis_gti, solargis_ghi, solargis_kwp, n_arrays, arrays
     """
     df = pd.read_csv(csv_path)
+
+    # Some folders contain "whole period" exports (multiple months). Filter down
+    # to the month implied by the folder name, if provided.
+    if month_prefix:
+        if "time" not in df.columns:
+            return None
+        mask = df["time"].astype(str).str.startswith(month_prefix)
+        df = df.loc[mask]
+        if df.empty:
+            return None
 
     # Discover unique orientations (arrays)
     orientations = df[["azimuth", "slope"]].drop_duplicates()
@@ -177,11 +196,22 @@ def aggregate_solargis_monthly(
         if not month_label:
             continue
 
+        month_prefix = None
+        # Filter to the month implied by the folder name (YYYY MM) to avoid
+        # mis-aggregation when a CSV contains multiple months.
+        m = re.match(r"(\d{4})\s+(\d{2})", folder.name)
+        if m:
+            month_prefix = f"{m.group(1)}-{m.group(2)}"
+
         for csv_file in sorted(folder.glob("*.csv")):
-            if csv_file.name.lower() in ("combined.csv", "site_summary.csv"):
+            name_lower = csv_file.name.lower()
+            if name_lower in ("combined.csv", "site_summary.csv"):
+                continue
+            # Ignore analysis/comparison artifacts; they aren't SolarGIS raw exports.
+            if "pvgis" in name_lower or "compare" in name_lower:
                 continue
             try:
-                result = _compute_site_monthly_poa(csv_file)
+                result = _compute_site_monthly_poa(csv_file, month_prefix=month_prefix)
             except Exception as exc:
                 print(f"  WARN: {csv_file}: {exc}")
                 continue
@@ -201,6 +231,87 @@ def aggregate_solargis_monthly(
     df = pd.DataFrame(records)
     if not df.empty:
         df = df.sort_values(["Site", "Month"]).reset_index(drop=True)
+    return df
+
+
+# ── DuckDB persistence ───────────────────────────────────────────────────
+
+def write_solargis_monthly_to_duckdb(
+    solargis_df: pd.DataFrame,
+    *,
+    db_path: Path | None = None,
+    table_name: str = "solargis_monthly",
+    if_exists: str = "replace",
+) -> None:
+    """Persist SolarGIS monthly aggregates into DuckDB.
+
+    This keeps downstream consumers (e.g. Notion sync, reporting) fast and
+    provides an explicit place to check whether new months/sites have landed.
+
+    Table schema (snake_case):
+      - site (TEXT)
+      - month (TEXT)           # e.g. "Jan-26"
+      - solargis_gti_kwh_m2 (DOUBLE)
+      - solargis_ghi_kwh_m2 (DOUBLE)
+      - solargis_kwp (DOUBLE)
+      - n_arrays (INTEGER)
+    """
+    if if_exists not in {"replace", "append", "fail"}:
+        raise ValueError("if_exists must be one of: replace, append, fail")
+
+    settings = get_settings()
+    target_db = db_path or settings.db_path
+
+    required = {"Site", "Month"}
+    missing = required - set(solargis_df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns in solargis_df: {sorted(missing)}")
+
+    df = solargis_df.copy()
+    rename_map = {
+        "Site": "site",
+        "Month": "month",
+        "SolarGIS GTI (kWh/m²)": "solargis_gti_kwh_m2",
+        "SolarGIS GHI (kWh/m²)": "solargis_ghi_kwh_m2",
+        "SolarGIS kWp": "solargis_kwp",
+        "n_arrays": "n_arrays",
+    }
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+    # Ensure all columns exist (future-proof if we adjust aggregation output).
+    for col in ["solargis_gti_kwh_m2", "solargis_ghi_kwh_m2", "solargis_kwp", "n_arrays"]:
+        if col not in df.columns:
+            df[col] = None
+
+    df = df[["site", "month", "solargis_gti_kwh_m2", "solargis_ghi_kwh_m2", "solargis_kwp", "n_arrays"]]
+
+    conn = duckdb.connect(str(target_db), config={"access_mode": "automatic"})
+    try:
+        conn.register("__solargis_df", df)
+
+        if if_exists == "replace":
+            conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+            conn.execute(f'CREATE TABLE "{table_name}" AS SELECT * FROM __solargis_df')
+        elif if_exists == "append":
+            # Create if missing, then append.
+            conn.execute(
+                f'CREATE TABLE IF NOT EXISTS "{table_name}" AS SELECT * FROM __solargis_df WHERE 1=0'
+            )
+            conn.execute(f'INSERT INTO "{table_name}" SELECT * FROM __solargis_df')
+        else:
+            conn.execute(f'CREATE TABLE "{table_name}" AS SELECT * FROM __solargis_df')
+    finally:
+        conn.close()
+
+
+def refresh_solargis_monthly_table(
+    *,
+    data_root: Path | None = None,
+    db_path: Path | None = None,
+    table_name: str = "solargis_monthly",
+) -> pd.DataFrame:
+    """Compute aggregates from CSVs and write them into DuckDB."""
+    df = aggregate_solargis_monthly(data_root=data_root)
+    write_solargis_monthly_to_duckdb(df, db_path=db_path, table_name=table_name, if_exists="replace")
     return df
 
 
@@ -318,6 +429,17 @@ def main() -> None:
     parser.add_argument("--csv", action="store_true", help="Write output CSV")
     parser.add_argument("--kwp", action="store_true", help="Run kWp cross-reference check")
     parser.add_argument("--compare", action="store_true", help="Compare SolarGIS vs solar_data actuals")
+    parser.add_argument(
+        "--write-db",
+        action="store_true",
+        help='Persist results to DuckDB table "solargis_monthly" (replaces existing table)',
+    )
+    parser.add_argument(
+        "--db-path",
+        type=Path,
+        default=None,
+        help="Override DuckDB path (default: Settings.db_path)",
+    )
     parser.add_argument("--data-root", type=Path, help="Override SolarGIS data folder")
     args = parser.parse_args()
 
@@ -325,6 +447,11 @@ def main() -> None:
     df = aggregate_solargis_monthly(data_root=args.data_root)
     print(f"  {len(df)} site-months from {df['Site'].nunique()} sites")
     print(f"  Months: {sorted(df['Month'].unique())}")
+
+    if args.write_db:
+        print('\nWriting to DuckDB table "solargis_monthly"...')
+        write_solargis_monthly_to_duckdb(df, db_path=args.db_path, table_name="solargis_monthly", if_exists="replace")
+        print("  Done")
 
     if args.csv:
         out = Path("solargis_monthly.csv")

@@ -213,6 +213,13 @@ PAGE_GROUPS: dict[str, PageGroup] = {
                 roles=["engineer", "manager", "admin"],
                 description="Export data in various formats",
             ),
+            "Data Pull": PageConfig(
+                module="modules.data_pull_ui",
+                func="render",
+                icon="⬇️",
+                roles=["engineer", "manager", "admin"],
+                description="Pull inverter data from Juggle/EMIG API",
+            ),
         },
     ),
     "Admin": PageGroup(
