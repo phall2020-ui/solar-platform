@@ -25,10 +25,31 @@ class AlertRepository(BaseRepository):
 
     def __init__(self, engine=None):
         super().__init__(engine=engine)
-        self.ensure_tables()
+        # Creating tables requires a write lock. When the main DB is being written
+        # by a long-running job (e.g. a backfill), DuckDB can refuse the lock.
+        # The UI should still be able to render in read-only mode, so we treat
+        # "ensure tables" as best-effort and degrade gracefully.
+        try:
+            self.ensure_tables()
+        except Exception:
+            # Do not fail initialization; list_* methods will fall back to empty
+            # results when tables aren't available.
+            pass
 
     def ensure_tables(self) -> None:
         """Create required alert tables and indexes when absent."""
+        # Fast path: if tables already exist, avoid taking a write lock.
+        try:
+            if (
+                self.engine.table_exists("alerts")
+                and self.engine.table_exists("alert_rules")
+                and self.engine.table_exists("tickets")
+            ):
+                return
+        except Exception:
+            # If introspection fails, fall back to attempting creation below.
+            pass
+
         self.engine.execute(
             """
             CREATE TABLE IF NOT EXISTS alerts (
@@ -132,6 +153,13 @@ class AlertRepository(BaseRepository):
         limit: int | None = None,
     ) -> list[Alert]:
         """Query alerts with optional filters."""
+        # If tables are unavailable (e.g. DB locked during startup), treat as no alerts.
+        try:
+            if not self.engine.table_exists("alerts"):
+                return []
+        except Exception:
+            return []
+
         conditions: list[str] = []
         params: list[Any] = []
 
@@ -151,8 +179,11 @@ class AlertRepository(BaseRepository):
             sql += " LIMIT ?"
             params.append(limit)
 
-        df = self.engine.execute_df(sql, tuple(params) if params else None)
-        return [self._record_to_alert(record) for record in df.to_dict(orient="records")]
+        try:
+            df = self.engine.execute_df(sql, tuple(params) if params else None)
+            return [self._record_to_alert(record) for record in df.to_dict(orient="records")]
+        except Exception:
+            return []
 
     def get_active_alert_by_rule(self, plant_uid: str, rule_id: str) -> Alert | None:
         """Return an active/acknowledged alert for a plant+rule if it exists."""
