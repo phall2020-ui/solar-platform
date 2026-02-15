@@ -1,0 +1,82 @@
+name: Monthly Email Queue
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_type:
+        description: "Run type for the queued page"
+        required: true
+        default: "TEST"
+        type: choice
+        options:
+          - TEST
+          - PROD
+      status:
+        description: "Notion Status value to set on the queued page"
+        required: true
+        default: "Test draft"
+      month:
+        description: "Target month (YYYY-MM). Leave blank for previous month in SYNC_TIMEZONE."
+        required: false
+        default: ""
+      recipients:
+        description: "Comma-separated recipient emails"
+        required: true
+      queue_db_id:
+        description: "Notion Email Queue database ID"
+        required: true
+        default: "3061773a96c081cfa9a0f9aa521b70ea"
+      top_n:
+        description: "Top N outliers to include"
+        required: false
+        default: "5"
+      overwrite_existing:
+        description: "Overwrite an existing page for that month/run_type if present (true/false)"
+        required: false
+        default: "true"
+
+jobs:
+  queue-monthly-email:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Create/Update Queue Page
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          # Comparison DB (Meter / inverter comparison)
+          NOTION_DB_ID: ${{ secrets.NOTION_DB_ID }}
+        run: |
+          set -euo pipefail
+
+          ARGS=(
+            --run-type "${{ inputs.run_type }}"
+            --status "${{ inputs.status }}"
+            --top-n "${{ inputs.top_n }}"
+            --recipients "${{ inputs.recipients }}"
+            --comparison-db-id "${NOTION_DB_ID}"
+            --queue-db-id "${{ inputs.queue_db_id }}"
+          )
+
+          if [ -n "${{ inputs.month }}" ]; then
+            ARGS+=(--month "${{ inputs.month }}")
+          fi
+
+          if [ "${{ inputs.overwrite_existing }}" = "true" ]; then
+            ARGS+=(--overwrite-existing)
+          fi
+
+          python3 tools/inverter-data-juggle/monthly_email_queue.py "${ARGS[@]}"
+

@@ -11,20 +11,10 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# Lazy import to avoid circular dependency (unified_config → services → toolkit_bridge → unified_config)
-_config = None
-
-def _get_config():
-    global _config
-    if _config is None:
-        from solar_platform.config import config as _cfg
-        _config = _cfg
-    return _config
-
 def _ensure_toolkit_path():
     """Add Solar Toolkit to sys.path lazily."""
-    cfg = _get_config()
-    path_str = str(cfg.SOLAR_TOOLKIT_PATH)
+    from solar_platform.config import SOLAR_TOOLKIT_PATH
+    path_str = str(SOLAR_TOOLKIT_PATH)
     if path_str not in sys.path:
         sys.path.insert(0, path_str)
 

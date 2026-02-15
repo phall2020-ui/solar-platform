@@ -19,9 +19,13 @@ APP_NAME: str = "☀️ Solar Portfolio Manager"
 APP_VERSION: str = "2.0.0"
 PAGE_TITLE: str = "Solar Portfolio Manager"
 PAGE_ICON: str = "☀️"
-BASE_PATH: Path = Path(__file__).resolve().parent.parent
-SOLAR_TOOLKIT_PATH: Path = BASE_PATH / "Solar Toolkit"
-MONTHLY_REPORTING_PATH: Path = BASE_PATH / "Monthly reporting"
+# Repo root (…/solar-platform). This keeps legacy path constants stable even
+# though this module lives under `src/`.
+BASE_PATH: Path = Path(__file__).resolve().parents[2]
+
+# Legacy code still lives under `platform/` for now.
+SOLAR_TOOLKIT_PATH: Path = BASE_PATH / "platform" / "Solar Toolkit"
+MONTHLY_REPORTING_PATH: Path = BASE_PATH / "platform" / "Monthly reporting"
 
 BRAND_COLORS: dict[str, str] = {
     "primary": "#5FBFA0",

@@ -7,12 +7,12 @@ import io
 import logging
 import sys
 
-from solar_platform.config import config
+from solar_platform.config import SOLAR_TOOLKIT_PATH
 
 logger = logging.getLogger(__name__)
 
 # Ensure toolkit path is available for imports
-toolkit_path = str(config.SOLAR_TOOLKIT_PATH)
+toolkit_path = str(SOLAR_TOOLKIT_PATH)
 if toolkit_path not in sys.path:
     sys.path.insert(0, toolkit_path)
 

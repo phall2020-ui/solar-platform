@@ -383,7 +383,7 @@ def get_error_handler() -> AppErrorHandler:
         # Try to use reporting DB for error logging
         try:
             from solar_platform.config import config
-            _global_handler = AppErrorHandler(db_path=str(config.REPORTING_DB))
+            _global_handler = AppErrorHandler(db_path=str(config.db_path))
         except Exception:
             _global_handler = AppErrorHandler()
     return _global_handler

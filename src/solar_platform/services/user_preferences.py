@@ -2,8 +2,15 @@
 User Preferences Service
 Persists user-specific settings across sessions with DuckDB backend.
 """
+from __future__ import annotations
+
 import json
+import os
+import sys
+import tempfile
+from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import functools
@@ -45,25 +52,62 @@ class UserPreferences:
         Initialize preferences manager.
         
         Args:
-            db_path: Path to DuckDB database
+            db_path: Path to the application's DuckDB database (used to derive a stable prefs DB location)
             user_id: User identifier (default for single-user mode)
         """
-        self.db_path = db_path
+        # Preferences should not contend with the main analytics DB.
+        # Persist them in a separate DuckDB file next to (or derived from) the main DB path.
+        self.db_path = self._resolve_prefs_db_path(db_path)
         self.user_id = user_id
         self._init_db()
         self._cache = None
     
+    @staticmethod
+    def _resolve_prefs_db_path(app_db_path: str) -> str:
+        """Resolve a safe, persistent preferences DB path.
+
+        Using a separate file avoids DuckDB lock conflicts with long-running jobs
+        that write to the main database (e.g., backfills).
+        """
+        env_override = os.environ.get("SOLAR_PLATFORM_PREFS_DB", "").strip()
+        if env_override:
+            return str(Path(env_override).expanduser())
+
+        try:
+            p = Path(app_db_path).expanduser() if app_db_path else None
+            if p and p.suffix:
+                base_dir = p.parent
+            elif p:
+                base_dir = p
+            else:
+                base_dir = Path.home() / ".solar_toolkit"
+
+            base_dir.mkdir(parents=True, exist_ok=True)
+            return str(base_dir / "user_preferences.duckdb")
+        except Exception:
+            return str(Path(tempfile.gettempdir()) / "solar_portfolio_prefs.duckdb")
+
+    @contextmanager
     def _get_connection(self):
         """Get a database connection context manager with fallback handling."""
+        ctx = None
+        conn = None
         try:
-            # Test that we can connect before returning the context manager
-            return _db_get_connection(self.db_path)
-        except Exception:
-            import os
-            import tempfile
-            local_prefs_path = os.path.join(tempfile.gettempdir(), "solar_portfolio_prefs.duckdb")
-            self.db_path = local_prefs_path
-            return _db_get_connection(self.db_path)
+            try:
+                ctx = _db_get_connection(self.db_path)
+                conn = ctx.__enter__()
+            except Exception:
+                # Last-resort: fall back to a temp DB if the configured location is not writable.
+                fallback = str(Path(tempfile.gettempdir()) / "solar_portfolio_prefs.duckdb")
+                self.db_path = fallback
+                ctx = _db_get_connection(self.db_path)
+                conn = ctx.__enter__()
+
+            yield conn
+        finally:
+            if ctx is not None:
+                exc_type, exc, tb = sys.exc_info()
+                ctx.__exit__(exc_type, exc, tb)
 
     def _init_db(self):
         """Create preferences table if it doesn't exist."""
@@ -293,7 +337,7 @@ def get_preferences() -> UserPreferences:
     try:
         from solar_platform.config import get_settings
         settings = get_settings()
-        return init_preferences(str(settings.REPORTING_DB))
+        return init_preferences(str(settings.db_path))
     except Exception:
         raise RuntimeError("Preferences not initialized. Call init_preferences() first.")
 

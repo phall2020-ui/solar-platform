@@ -13,20 +13,10 @@ logger = logging.getLogger(__name__)
 from solar_platform.db.utils import get_connection as _db_get_connection
 from solar_platform.services.observability import get_logger
 
-# Lazy import to avoid circular dependency (unified_config → services → reporting_bridge → unified_config)
-_config = None
-
-def _get_config():
-    global _config
-    if _config is None:
-        from solar_platform.config import config as _cfg
-        _config = _cfg
-    return _config
-
 def _ensure_reporting_path():
     """Add Monthly Reporting to sys.path lazily."""
-    cfg = _get_config()
-    path_str = str(cfg.MONTHLY_REPORTING_PATH)
+    from solar_platform.config import MONTHLY_REPORTING_PATH
+    path_str = str(MONTHLY_REPORTING_PATH)
     if path_str not in sys.path:
         sys.path.insert(0, path_str)
 
@@ -93,8 +83,8 @@ class ReportingBridge:
         
         # Initialize materialized views manager if feature enabled
         self.views_manager = None
-        cfg = _get_config()
-        if cfg.use_cached_views:
+        from solar_platform.config import get_settings
+        if get_settings().use_cached_views:
             try:
                 from solar_platform.services.materialized_views import MaterializedViewsManager
                 self.views_manager = MaterializedViewsManager(self.db_path)

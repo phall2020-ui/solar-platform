@@ -7,6 +7,7 @@ Current: DuckDB. Future: PostgreSQL via SQLAlchemy asyncpg.
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -40,17 +41,63 @@ class DuckDBEngine:
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
 
+    @staticmethod
+    def _is_lock_error(exc: BaseException) -> bool:
+        msg = str(exc).lower()
+        return (
+            "could not set lock" in msg
+            or "conflicting lock is held" in msg
+            or "database is locked" in msg
+        )
+
+    @staticmethod
+    def _is_read_query(query: str) -> bool:
+        """Heuristic to decide if a query can be executed in read-only mode."""
+        q = query.lstrip().upper()
+        if not q:
+            return False
+        # Common read-only statements.
+        if q.startswith(("SELECT", "PRAGMA", "SHOW", "DESCRIBE", "EXPLAIN")):
+            return True
+        if q.startswith("WITH"):
+            # CTEs are usually read queries in this codebase; treat as write if it contains write keywords.
+            write_keywords = ("INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "COPY")
+            return not any(k in q for k in write_keywords)
+        return False
+
     @contextmanager
     def connection(self, read_only: bool = False) -> Generator[duckdb.DuckDBPyConnection, None, None]:
         """Get a DuckDB connection with automatic fallback for lock conflicts."""
         conn: duckdb.DuckDBPyConnection | None = None
-        try:
-            conn = duckdb.connect(self.db_path, read_only=read_only)
-        except duckdb.ConnectionException:
+        last_exc: BaseException | None = None
+        # Retry briefly on lock conflicts (common when a backfill is writing).
+        for attempt in range(4):
+            try:
+                conn = duckdb.connect(self.db_path, read_only=read_only)
+                last_exc = None
+                break
+            except Exception as exc:
+                last_exc = exc
+                if not self._is_lock_error(exc):
+                    break
+                time.sleep(0.2 * (attempt + 1))
+
+        if conn is None and last_exc is not None:
+            # Fallback strategies for lock conflicts and permission issues.
             try:
                 conn = duckdb.connect(self.db_path, read_only=True)
-            except duckdb.ConnectionException:
-                conn = duckdb.connect(self.db_path, config={"access_mode": "automatic"})
+                last_exc = None
+            except Exception as exc:
+                last_exc = exc
+                try:
+                    conn = duckdb.connect(self.db_path, config={"access_mode": "automatic"})
+                    last_exc = None
+                except Exception as exc2:
+                    last_exc = exc2
+
+        if conn is None:
+            assert last_exc is not None
+            raise last_exc
 
         try:
             yield conn
@@ -72,14 +119,14 @@ class DuckDBEngine:
 
     def execute(self, query: str, params: tuple | None = None) -> list[Any]:
         """Execute a query and return rows."""
-        with self.connection(read_only=False) as conn:
+        with self.connection(read_only=self._is_read_query(query)) as conn:
             if params is not None:
                 return conn.execute(query, params).fetchall()
             return conn.execute(query).fetchall()
 
     def execute_df(self, query: str, params: tuple | None = None) -> pd.DataFrame:
         """Execute a query and return DataFrame rows."""
-        with self.connection(read_only=False) as conn:
+        with self.connection(read_only=self._is_read_query(query)) as conn:
             if params is not None:
                 return conn.execute(query, params).fetchdf()
             return conn.execute(query).fetchdf()

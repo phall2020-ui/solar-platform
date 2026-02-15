@@ -19,8 +19,8 @@ _config = None
 def _get_config():
     global _config
     if _config is None:
-        from solar_platform.config import config
-        _config = config
+        from solar_platform.config import get_settings
+        _config = get_settings()
     return _config
 
 class MaterializedViewsManager:
@@ -85,14 +85,18 @@ class MaterializedViewsManager:
         Args:
             db_path: Path to the reporting database. Uses config default if None.
         """
-        config = _get_config()
-        self.db_path = db_path or str(config.REPORTING_DB)
+        settings = _get_config()
+        self.db_path = db_path or str(settings.db_path)
         self.logger = get_logger()
         self._ensure_metadata_table()
     
     def _get_connection(self):
         """Get a database connection context manager."""
-        return _db_get_connection(self.db_path)
+        return _db_get_connection(self.db_path, read_only=False)
+
+    def _get_ro_connection(self):
+        """Get a read-only database connection context manager."""
+        return _db_get_connection(self.db_path, read_only=True)
     
     def _ensure_metadata_table(self) -> None:
         """Create metadata table if it doesn't exist."""
@@ -218,7 +222,7 @@ class MaterializedViewsManager:
             DateTime of last refresh, or None if never refreshed.
         """
         try:
-            with self._get_connection() as conn:
+            with self._get_ro_connection() as conn:
                 cursor = conn.execute(f"""
                     SELECT last_refresh FROM {self.METADATA_TABLE}
                     WHERE view_name = ?
@@ -237,7 +241,7 @@ class MaterializedViewsManager:
             Dictionary with last_refresh, row_count, duration_ms, status.
         """
         try:
-            with self._get_connection() as conn:
+            with self._get_ro_connection() as conn:
                 cursor = conn.execute(f"""
                     SELECT last_refresh, row_count, refresh_duration_ms, status
                     FROM {self.METADATA_TABLE}
@@ -280,7 +284,7 @@ class MaterializedViewsManager:
             DataFrame with query results, or empty DataFrame on error.
         """
         try:
-            with self._get_connection() as conn:
+            with self._get_ro_connection() as conn:
                 # Check if view exists
                 cursor = conn.execute(
                     "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",

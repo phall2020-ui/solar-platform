@@ -19,8 +19,8 @@ def _get_config():
     """Lazy load config to avoid import cycles."""
     global _config
     if _config is None:
-        from solar_platform.config import config
-        _config = config
+        from solar_platform.config import get_settings
+        _config = get_settings()
     return _config
 
 
@@ -42,7 +42,7 @@ def _get_logger():
                 "ERROR": logging.ERROR,
                 "CRITICAL": logging.CRITICAL,
             }
-            log_level = log_level_map.get(config.LOG_LEVEL.upper(), logging.INFO)
+            log_level = log_level_map.get(str(config.log_level).upper(), logging.INFO)
             
             processors = [
                 structlog.contextvars.merge_contextvars,
@@ -51,7 +51,7 @@ def _get_logger():
             ]
             
             # JSON output for production, console for dev
-            if config.LOG_FORMAT == "json":
+            if str(config.log_format).lower() == "json":
                 processors.append(structlog.processors.JSONRenderer())
             else:
                 processors.append(structlog.dev.ConsoleRenderer())
