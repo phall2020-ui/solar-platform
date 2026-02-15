@@ -24,6 +24,10 @@ jobs:
     defaults:
       run:
         working-directory: tools/inverter-data-juggle
+    env:
+      # Target Notion database for the daily meter/inverter comparison rows.
+      # Source: https://www.notion.so/3041773a96c08150b90ed65a266ee6a7
+      NOTION_DB_ID: 3041773a-96c0-8150-b90e-d65a266ee6a7
 
     steps:
       - name: Checkout code
@@ -43,8 +47,6 @@ jobs:
         env:
           JUGGLE_API_KEY: ${{ secrets.JUGGLE_API_KEY }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
-          NOTION_DB_ID: ${{ secrets.NOTION_DB_ID }}
         run: |
           missing=()
           if [ -z "$JUGGLE_API_KEY" ]; then
@@ -53,13 +55,36 @@ jobs:
           if [ -z "$NOTION_TOKEN" ]; then
             missing+=("NOTION_TOKEN")
           fi
-          if [ -z "$NOTION_DB_ID" ] && [ -z "$NOTION_PAGE_ID" ]; then
-            missing+=("NOTION_DB_ID or NOTION_PAGE_ID")
-          fi
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing required secrets: ${missing[*]}"
             exit 1
           fi
+
+      - name: Verify Notion DB Access
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+
+          token = os.environ.get("NOTION_TOKEN", "")
+          db_id = os.environ.get("NOTION_DB_ID", "")
+          if not token or not db_id:
+            raise SystemExit("Missing NOTION_TOKEN or NOTION_DB_ID")
+
+          headers = {
+            "Authorization": f"Bearer {token}",
+            "Notion-Version": "2022-06-28",
+          }
+          r = requests.get(f"https://api.notion.com/v1/databases/{db_id}", headers=headers, timeout=30)
+          if r.status_code == 200:
+            print(f"Notion DB access OK: {db_id}")
+            raise SystemExit(0)
+          print(f"Notion DB access FAILED ({r.status_code}): {r.text[:500]}")
+          print("If this is object_not_found, share the database with your Notion integration used by NOTION_TOKEN.")
+          raise SystemExit(1)
+          PY
 
       - name: Run Notion Sync
         env:
@@ -69,7 +94,6 @@ jobs:
           SOLIS_KEY_SECRET: ${{ secrets.SOLIS_KEY_SECRET }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
-          NOTION_DB_ID: ${{ secrets.NOTION_DB_ID }}
           SOLAREDGE_KEYS_JSON: ${{ secrets.SOLAREDGE_KEYS_JSON }}
           SYNC_SMTP_SERVER: ${{ secrets.SYNC_SMTP_SERVER }}
           SYNC_SMTP_PORT: ${{ secrets.SYNC_SMTP_PORT }}
