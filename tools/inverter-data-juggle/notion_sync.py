@@ -37,22 +37,32 @@ JUGGLE_API_KEY = os.environ.get('JUGGLE_API_KEY')
 NOTION_TOKEN = os.environ.get('NOTION_TOKEN')
 NOTION_PAGE_ID = os.environ.get('NOTION_PAGE_ID')
 NOTION_DB_ID = os.environ.get('NOTION_DB_ID')
-REQUEST_TIMEOUT_S = float(os.environ.get("SYNC_REQUEST_TIMEOUT_S", "30"))
-SYNC_TIMEZONE = os.environ.get("SYNC_TIMEZONE", "Europe/London")
-SYNC_LAG_DAYS = int(os.environ.get("SYNC_LAG_DAYS", "1"))
-SYNC_MONTH_CLOSE_GRACE_DAYS = int(os.environ.get("SYNC_MONTH_CLOSE_GRACE_DAYS", "3"))
-SYNC_SNAPSHOT_DIR = os.environ.get("SYNC_SNAPSHOT_DIR", "sync_snapshots")
 
-SYNC_SMTP_SERVER = os.environ.get("SYNC_SMTP_SERVER", "")
-SYNC_SMTP_PORT = int(os.environ.get("SYNC_SMTP_PORT", "587"))
-SYNC_SMTP_USERNAME = os.environ.get("SYNC_SMTP_USERNAME", "")
-SYNC_SMTP_PASSWORD = os.environ.get("SYNC_SMTP_PASSWORD", "")
-SYNC_SMTP_USE_TLS = os.environ.get("SYNC_SMTP_USE_TLS", "true").lower() == "true"
-SYNC_EMAIL_FROM = os.environ.get("SYNC_EMAIL_FROM", "")
-SYNC_EMAIL_TO = [x.strip() for x in os.environ.get("SYNC_EMAIL_TO", "").split(",") if x.strip()]
+def _env(key: str, default: str) -> str:
+    """Environment helper: treat unset OR empty-string values as default."""
+    val = os.environ.get(key)
+    if val is None:
+        return default
+    if isinstance(val, str) and val.strip() == "":
+        return default
+    return val
+
+REQUEST_TIMEOUT_S = float(_env("SYNC_REQUEST_TIMEOUT_S", "30"))
+SYNC_TIMEZONE = _env("SYNC_TIMEZONE", "Europe/London")
+SYNC_LAG_DAYS = int(_env("SYNC_LAG_DAYS", "1"))
+SYNC_MONTH_CLOSE_GRACE_DAYS = int(_env("SYNC_MONTH_CLOSE_GRACE_DAYS", "3"))
+SYNC_SNAPSHOT_DIR = _env("SYNC_SNAPSHOT_DIR", "sync_snapshots")
+
+SYNC_SMTP_SERVER = _env("SYNC_SMTP_SERVER", "")
+SYNC_SMTP_PORT = int(_env("SYNC_SMTP_PORT", "587"))
+SYNC_SMTP_USERNAME = _env("SYNC_SMTP_USERNAME", "")
+SYNC_SMTP_PASSWORD = _env("SYNC_SMTP_PASSWORD", "")
+SYNC_SMTP_USE_TLS = _env("SYNC_SMTP_USE_TLS", "true").lower() == "true"
+SYNC_EMAIL_FROM = _env("SYNC_EMAIL_FROM", "")
+SYNC_EMAIL_TO = [x.strip() for x in _env("SYNC_EMAIL_TO", "").split(",") if x.strip()]
 
 # Load SolarEdge Keys
-SOLAREDGE_KEYS_JSON = os.environ.get('SOLAREDGE_KEYS_JSON', '{}')
+SOLAREDGE_KEYS_JSON = _env('SOLAREDGE_KEYS_JSON', '{}')
 try:
     SOLAREDGE_KEYS = json.loads(SOLAREDGE_KEYS_JSON)
 except json.JSONDecodeError:
