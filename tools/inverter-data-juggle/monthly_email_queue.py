@@ -228,10 +228,10 @@ def build_monthly_stats(
 ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
     """
     Returns:
-      - totals per site: {site: {inv_kwh, meter_kwh, diff_frac}}
+      - totals per site: {site: {inv_kwh, meter_kwh, portal_kwh, diff_frac}}
       - representative page URL per site (latest date in range)
     """
-    totals: Dict[str, Dict[str, Any]] = {s: {"inv_kwh": 0.0, "meter_kwh": 0.0} for s in sites}
+    totals: Dict[str, Dict[str, Any]] = {s: {"inv_kwh": 0.0, "meter_kwh": 0.0, "portal_kwh": 0.0} for s in sites}
     latest: Dict[str, Tuple[str, str]] = {}  # site -> (date_str, page_id)
 
     for page in pages:
@@ -245,9 +245,11 @@ def build_monthly_stats(
         dt = _extract_date(page, "Date")
         inv = _extract_number(page, "Juggle Inv (Daily)")
         meter = _extract_number(page, "Juggle Meter (Daily)")
+        portal = _extract_number(page, "Platform (Daily)")
 
         totals[site]["inv_kwh"] += inv
         totals[site]["meter_kwh"] += meter
+        totals[site]["portal_kwh"] += portal
 
         pid = page.get("id") or ""
         if dt and pid:
@@ -283,24 +285,54 @@ def build_email_body(
     no_comparison_sites: int,
     site_errors: int,
     top_outliers: List[Tuple[str, float, str]],
+    site_rows: List[Tuple[str, float, float, float, float, str]],
 ) -> str:
     """
     Body is stored as a rich_text string; downstream automation can treat it as HTML.
     We use <br> separators (not \\n) to match existing content patterns.
 
     top_outliers: list of (site_name, diff_frac, link_url)
+    site_rows: list of (site_name, meter_kwh, inv_kwh, portal_kwh, diff_frac, notion_url)
     """
     month_name = calendar.month_name[month_start.month]
     lines: List[str] = []
     lines.append("Hi team,")
     lines.append("")
-    lines.append(f"{month_name} {month_start.year} summary ({month_start.isoformat()} to {month_end.isoformat()})")
+    lines.append(f"{month_name} {month_start.year} summary")
+    lines.append(f"Dates: {month_start.isoformat()} to {month_end.isoformat()}")
     lines.append("")
     lines.append(f"Top {len(top_outliers)} sites by absolute % deviation (Inv vs Meter):")
     for site, diff, link in top_outliers:
         pct = diff * 100.0
         link_part = link if link else "n/a"
         lines.append(f"- {site}: {pct:+.1f}% | {link_part}")
+    lines.append("")
+    lines.append("Monthly totals by site:")
+
+    # Important: keep the whole table as a single string so the surrounding
+    # "<br>" join doesn't insert breaks inside table markup.
+    table_parts: List[str] = []
+    table_parts.append("<table border=\"1\" cellspacing=\"0\" cellpadding=\"4\">")
+    table_parts.append("<thead><tr>")
+    table_parts.append("<th>Site</th>")
+    table_parts.append("<th>Juggle Meter (kWh)</th>")
+    table_parts.append("<th>Juggle Inverter (kWh)</th>")
+    table_parts.append("<th>Inverter Portal (kWh)</th>")
+    table_parts.append("<th>% Diff (Inv vs Meter)</th>")
+    table_parts.append("</tr></thead><tbody>")
+    for site, meter_kwh, inv_kwh, portal_kwh, diff_frac, url in site_rows:
+        site_cell = f"<a href=\"{url}\">{site}</a>" if url else site
+        portal_cell = f"{portal_kwh:.1f}" if portal_kwh > 0 else "-"
+        diff_cell = f"{diff_frac * 100.0:+.1f}%" if (meter_kwh > 0 and inv_kwh > 0) else "-"
+        table_parts.append("<tr>")
+        table_parts.append(f"<td>{site_cell}</td>")
+        table_parts.append(f"<td>{meter_kwh:.1f}</td>")
+        table_parts.append(f"<td>{inv_kwh:.1f}</td>")
+        table_parts.append(f"<td>{portal_cell}</td>")
+        table_parts.append(f"<td>{diff_cell}</td>")
+        table_parts.append("</tr>")
+    table_parts.append("</tbody></table>")
+    lines.append("".join(table_parts))
     lines.append("")
     lines.append(f"Synced Sites: {synced_sites}")
     lines.append(f"Inverter-only Sites: {inverter_only_sites}")
@@ -445,15 +477,20 @@ def main() -> None:
     site_errors = 0  # Reserved for future: pulling from APIs; currently summarizing Notion DB only.
 
     outlier_candidates: List[Tuple[float, str, float, str]] = []
+    site_rows: List[Tuple[str, float, float, float, float, str]] = []
     for site in sites:
-        t = totals.get(site) or {"inv_kwh": 0.0, "meter_kwh": 0.0, "diff_frac": 0.0}
+        t = totals.get(site) or {"inv_kwh": 0.0, "meter_kwh": 0.0, "portal_kwh": 0.0, "diff_frac": 0.0}
         inv = float(t.get("inv_kwh") or 0.0)
         meter = float(t.get("meter_kwh") or 0.0)
+        portal = float(t.get("portal_kwh") or 0.0)
         diff = float(t.get("diff_frac") or 0.0)
+        url = page_urls.get(site, "")
+
+        site_rows.append((site, meter, inv, portal, diff, url))
 
         if inv > 0 and meter > 0:
             synced += 1
-            outlier_candidates.append((abs(diff), site, diff, page_urls.get(site, "")))
+            outlier_candidates.append((abs(diff), site, diff, url))
         elif inv > 0 and meter == 0:
             inverter_only += 1
         else:
@@ -473,6 +510,7 @@ def main() -> None:
         no_comparison_sites=no_comparison,
         site_errors=site_errors,
         top_outliers=top_outliers,
+        site_rows=site_rows,
     )
 
     name = f"{run_type} Monthly Summary {ym}"

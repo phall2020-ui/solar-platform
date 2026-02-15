@@ -16,11 +16,6 @@ on:
         options:
           - TEST
           - PROD
-      status:
-        description: "Notion Status value to set on the queued page"
-        required: true
-        # Note: "Ready to send" will be picked up by downstream automation.
-        default: "Ready to send"
       month:
         description: "Target month (YYYY-MM). Leave blank for previous month."
         required: false
@@ -68,13 +63,12 @@ jobs:
             exit 0
           fi
 
-          GRACE_DAYS="3"
-          DAY="$(date -u +%d | sed 's/^0//')"
-          if [ "${DAY}" -le "${GRACE_DAYS}" ]; then
+          DAY="$(date -u +%d)"
+          if [ "${DAY}" = "01" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Not in month-close grace window (day=${DAY} > ${GRACE_DAYS}). Skipping."
+            echo "Not day 1 (day=${DAY}). Skipping."
           fi
 
       - name: Checkout code
@@ -151,14 +145,12 @@ jobs:
           # Automatic runs always create the PROD page and set it ready for the downstream sender.
           if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ]; then
             RUN_TYPE="PROD"
-            STATUS="Ready to send"
             TOP_N="5"
             MONTH=""
             RECIPIENTS="${MONTHLY_EMAIL_RECIPIENTS}"
             OVERWRITE="false"
           else
             RUN_TYPE="${{ inputs.run_type }}"
-            STATUS="${{ inputs.status }}"
             TOP_N="${{ inputs.top_n }}"
             MONTH="${{ inputs.month }}"
             RECIPIENTS="${{ inputs.recipients }}"
@@ -175,7 +167,7 @@ jobs:
 
           ARGS=(
             --run-type "${RUN_TYPE}"
-            --status "${STATUS}"
+            --status "Ready to send"
             --top-n "${TOP_N}"
             --recipients "${RECIPIENTS}"
             --comparison-db-id "${COMPARISON_DB_ID}"
