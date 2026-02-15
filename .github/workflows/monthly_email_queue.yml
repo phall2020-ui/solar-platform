@@ -18,7 +18,8 @@ on:
       status:
         description: "Notion Status value to set on the queued page"
         required: true
-        default: "Test draft"
+        # Note: "Ready to send" will be picked up by downstream automation.
+        default: "Ready to send"
       month:
         description: "Target month (YYYY-MM). Leave blank for previous month."
         required: false
@@ -156,4 +157,3 @@ jobs:
           fi
 
           python3 tools/inverter-data-juggle/monthly_email_queue.py "${ARGS[@]}"
-
