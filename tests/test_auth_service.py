@@ -128,23 +128,20 @@ class TestUserModel:
     """Tests for the User dataclass-like model."""
 
     def test_admin_has_all_permissions(self):
-        with patch("services.auth_service.st"):
-            from solar_platform.services.auth import User
+        from solar_platform.services.auth import User
         user = User(1, "admin", "a@b.com", "Admin", "admin")
         for perm in ("read", "write", "delete", "manage_users", "manage_settings", "export"):
             assert user.has_permission(perm) is True
 
     def test_viewer_has_read_only(self):
-        with patch("services.auth_service.st"):
-            from solar_platform.services.auth import User
+        from solar_platform.services.auth import User
         user = User(2, "viewer", "v@b.com", "Viewer", "viewer")
         assert user.has_permission("read") is True
         assert user.has_permission("write") is False
         assert user.has_permission("delete") is False
 
     def test_to_dict_contains_all_fields(self):
-        with patch("services.auth_service.st"):
-            from solar_platform.services.auth import User
+        from solar_platform.services.auth import User
         user = User(3, "test", "t@b.com", "Test User", "analyst", True)
         d = user.to_dict()
         assert d["user_id"] == 3
