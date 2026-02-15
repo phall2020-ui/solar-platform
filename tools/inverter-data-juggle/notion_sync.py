@@ -155,12 +155,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--send-email-summary", action="store_true",
                         help="Send end-of-run summary email.")
     parser.add_argument("--email-dry-run", action="store_true",
-                        help="Print summary email instead of sending.")
+                        help="Print summary email instead of sending (implies --send-email-summary).")
     parser.add_argument("--site", action="append", default=[],
                         help="Restrict sync to this site name (exact match). Can be repeated.")
     parser.add_argument("--site-contains", action="append", default=[],
                         help="Restrict sync to sites containing this substring (case-insensitive). Can be repeated.")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.email_dry_run:
+        args.send_email_summary = True
+    return args
 
 def save_run_snapshot(summary: Dict[str, Any], run_mode: str, target_days: list[str],
                       details: Optional[Dict[str, Any]] = None) -> Optional[str]:
