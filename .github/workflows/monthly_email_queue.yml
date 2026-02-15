@@ -167,7 +167,6 @@ jobs:
 
           ARGS=(
             --run-type "${RUN_TYPE}"
-            --status "Ready to send"
             --top-n "${TOP_N}"
             --recipients "${RECIPIENTS}"
             --comparison-db-id "${COMPARISON_DB_ID}"

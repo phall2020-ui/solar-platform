@@ -436,7 +436,6 @@ def create_or_update_queue_page(
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Create a Notion monthly email queue page.")
     p.add_argument("--run-type", choices=["PROD", "TEST"], default="TEST")
-    p.add_argument("--status", default="Ready to send", help="Queue page Status select value.")
     p.add_argument("--month", help="Target month YYYY-MM. Defaults to previous month in SYNC_TIMEZONE.")
     p.add_argument("--top-n", type=int, default=5)
     p.add_argument("--recipients", help="Comma-separated email recipients. Falls back to env MONTHLY_EMAIL_RECIPIENTS.")
@@ -453,7 +452,8 @@ def main() -> None:
     ym = f"{month_start.year:04d}-{month_start.month:02d}"
 
     run_type = args.run_type.upper()
-    status = args.status
+    # Always set to "Ready to send" so the downstream automation picks it up.
+    status = "Ready to send"
 
     comparison_db_id = _normalize_uuid(args.comparison_db_id or _env("NOTION_DB_ID", ""))
     if not comparison_db_id:
