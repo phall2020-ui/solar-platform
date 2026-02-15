@@ -17,6 +17,7 @@ import pandas as pd
 
 from services.database.repository import PlantRepository, ReadingsRepository
 from services.logging import get_logger
+from services.notion_asset_register_service import NotionAssetRegisterService
 
 logger = get_logger("services.plant")
 
@@ -27,6 +28,7 @@ class PlantService:
     def __init__(self):
         self._plants = PlantRepository()
         self._readings = ReadingsRepository()
+        self._asset_register = NotionAssetRegisterService()
 
     def get_plant(self, uid: str) -> dict[str, Any] | None:
         """Get plant details with current PR."""
@@ -36,6 +38,10 @@ class PlantService:
         now = datetime.now(UTC)
         pr = self._get_pr(uid, now - timedelta(hours=24), now)
         plant["current_pr"] = pr
+
+        asset_row = self._asset_register.get_asset_for_plant(uid, plant.get("alias"))
+        if asset_row:
+            plant["asset_register"] = asset_row
         return plant
 
     def get_all_plants(self) -> list[dict[str, Any]]:
@@ -43,7 +49,13 @@ class PlantService:
         df = self._plants.get_all()
         if df.empty:
             return []
-        return df.to_dict("records")
+        rows = df.to_dict("records")
+        for row in rows:
+            uid = str(row.get("plant_uid", ""))
+            asset_row = self._asset_register.get_asset_for_plant(uid, row.get("alias"))
+            if asset_row:
+                row["asset_register"] = asset_row
+        return rows
 
     def get_daily_summary(self, uid: str) -> dict[str, Any]:
         """Get today's summary for a plant."""

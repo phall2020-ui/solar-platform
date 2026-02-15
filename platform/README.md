@@ -104,6 +104,19 @@ Headless run:
 make run
 ```
 
+## Notion Asset Register Integration
+
+To surface asset-register metadata in Plant Detail pages, configure:
+
+- `NOTION_ASSET_SYNC_ENABLED=true`
+- `NOTION_INTEGRATION_TOKEN=<your notion integration token>` (or `NOTION_TOKEN`)
+- `NOTION_ASSET_DATABASE_ID=<notion database id>` (or `NOTION_DB_ID`)
+- `NOTION_ASSET_PLANT_UID_FIELD=Plant UID` (optional override)
+- `NOTION_ASSET_ALIAS_FIELD=Alias` (optional override)
+- `NOTION_ASSET_CACHE_TTL_SECONDS=300` (optional override)
+
+When enabled, the app matches Notion rows to plants by UID (first) then alias.
+
 ## Common Commands
 
 | Task | Command |

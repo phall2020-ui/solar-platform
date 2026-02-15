@@ -9,7 +9,6 @@ DESIGN NOTES FOR EXTRACTION:
 - Service layer stays unchanged
 """
 import streamlit as st
-from datetime import datetime, timedelta
 
 from components.kpi_cards import render_kpi_row, render_status_badge
 from services.plant_service import PlantService
@@ -72,7 +71,7 @@ def render_plant_detail():
     )
 
     with tab_overview:
-        _render_overview(service, plant_uid)
+        _render_overview(service, plant_uid, plant)
 
     with tab_production:
         _render_production(service, plant_uid)
@@ -87,7 +86,7 @@ def render_plant_detail():
         _render_history(service, plant_uid)
 
 
-def _render_overview(service: PlantService, plant_uid: str):
+def _render_overview(service: PlantService, plant_uid: str, plant: dict):
     """Plant overview tab with KPIs."""
     summary = service.get_daily_summary(plant_uid)
 
@@ -117,6 +116,21 @@ def _render_overview(service: PlantService, plant_uid: str):
             "status": "good" if summary.get("availability", 0) >= 98 else "warning",
         },
     ])
+
+    asset_register = plant.get("asset_register")
+    if asset_register:
+        st.divider()
+        st.subheader("Asset Register")
+        display_fields = {
+            key: value
+            for key, value in asset_register.items()
+            if key not in {"notion_page_id", "notion_url"}
+        }
+        if display_fields:
+            st.json(display_fields, expanded=False)
+        notion_url = asset_register.get("notion_url")
+        if notion_url:
+            st.caption(f"Source: {notion_url}")
 
 
 def _render_production(service: PlantService, plant_uid: str):
