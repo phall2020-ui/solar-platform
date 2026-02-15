@@ -14,7 +14,7 @@ from components import (
     job_status_viewer,
     submit_background_job_button,
 )
-from services import IncrementalETL, get_cache_layer, reporting
+from services import IncrementalETL, get_cache_layer, reporting_bridge as reporting
 from unified_config import config
 
 

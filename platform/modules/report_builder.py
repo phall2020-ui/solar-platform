@@ -9,8 +9,10 @@ PDF reports via the Phase 5 reporting engine services.
 from __future__ import annotations
 
 import logging
+import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 import streamlit as st
 
@@ -18,6 +20,109 @@ from components.kpi_cards import render_kpi_row
 from components.layouts import page_header
 
 from styles.design_tokens import AMPYR_TEAL, STATUS_COLORS
+
+# ── Report Item / Registry (used by report_button.py) ──────────────────
+
+
+@dataclass
+class ReportItem:
+    """A single item (chart/table/KPI/text) to include in a bespoke report."""
+
+    id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    item_type: Literal["chart", "table", "kpi", "text"] = "chart"
+    title: str = ""
+    description: str = ""
+    source_tab: str = ""
+
+    # Chart storage
+    figure: Any | None = None
+    figure_bytes: bytes | None = None
+
+    # Table storage
+    dataframe: Any | None = None
+
+    # KPI storage
+    metrics: dict | None = None
+
+    # Metadata
+    created_at: datetime = field(default_factory=datetime.now)
+    site_filter: str | None = None
+    date_range: tuple | None = None
+
+    # Layout
+    order: int = 0
+    page_break_before: bool = False
+    width: Literal["full", "half"] = "full"
+
+
+@dataclass
+class ReportConfig:
+    """Configuration for the entire bespoke report."""
+
+    title: str = "Monthly Executive Report"
+    subtitle: str = ""
+    report_month: str = ""
+    items: list[ReportItem] = field(default_factory=list)
+    include_cover_page: bool = True
+    include_table_of_contents: bool = False
+    created_at: datetime = field(default_factory=datetime.now)
+
+
+class ReportRegistry:
+    """Manages collections of ReportItem objects in session state."""
+
+    SESSION_KEY = "report_registry"
+
+    @classmethod
+    def initialize(cls) -> None:
+        if cls.SESSION_KEY not in st.session_state:
+            st.session_state[cls.SESSION_KEY] = ReportConfig()
+
+    @classmethod
+    def get_config(cls) -> ReportConfig:
+        cls.initialize()
+        return st.session_state[cls.SESSION_KEY]
+
+    @classmethod
+    def add_item(cls, item: ReportItem) -> bool:
+        config = cls.get_config()
+        item.order = len(config.items)
+        config.items.append(item)
+        return True
+
+    @classmethod
+    def remove_item(cls, item_id: str) -> None:
+        config = cls.get_config()
+        config.items = [i for i in config.items if i.id != item_id]
+        cls._reorder()
+
+    @classmethod
+    def reorder_items(cls, new_order: list[str]) -> None:
+        config = cls.get_config()
+        by_id = {i.id: i for i in config.items}
+        config.items = [by_id[uid] for uid in new_order if uid in by_id]
+        cls._reorder()
+
+    @classmethod
+    def _reorder(cls) -> None:
+        for idx, item in enumerate(cls.get_config().items):
+            item.order = idx
+
+    @classmethod
+    def clear(cls) -> None:
+        st.session_state[cls.SESSION_KEY] = ReportConfig()
+
+    @classmethod
+    def get_count(cls) -> int:
+        return len(cls.get_config().items)
+
+    @classmethod
+    def set_report_month(cls, month: str) -> None:
+        cls.get_config().report_month = month
+
+    @classmethod
+    def set_title(cls, title: str) -> None:
+        cls.get_config().title = title
 
 # ── Guarded service imports ─────────────────────────────────────────────
 

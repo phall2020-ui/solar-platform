@@ -1,5 +1,5 @@
 import pandas as pd
-from services import reporting
+from services import reporting_bridge as reporting
 import sys
 from pathlib import Path
 

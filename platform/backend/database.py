@@ -381,7 +381,7 @@ def get_db(settings: Settings | None = None) -> DatabaseManager:
     settings = settings or get_settings()
 
     if settings.db_backend == "duckdb":
-        backend = DuckDBBackend(db_path=settings.duckdb_path)
+        backend = DuckDBBackend(db_path=settings.db_path)
     elif settings.db_backend == "postgresql":
         backend = PostgreSQLBackend(
             dsn=settings.database_url,

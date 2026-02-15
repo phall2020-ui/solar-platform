@@ -4,7 +4,7 @@ from .cache_layer import CacheLayer, cached, get_cache_layer
 from .incremental_etl import DataQualityReport, DataQualityStatus, IncrementalETL
 from .materialized_views import MaterializedViewsManager, views_manager
 from .observability import MetricsStore, get_logger, metrics, timed_operation
-from .reporting_bridge import ReportingBridge, reporting
+from .reporting_bridge import ReportingBridge, reporting as reporting_bridge
 from .toolkit_bridge import ToolkitBridge, toolkit
 
 # Phase 1 Services
@@ -22,7 +22,7 @@ __all__ = [
     'ToolkitBridge',
     'toolkit',
     'ReportingBridge',
-    'reporting',
+    'reporting_bridge',
     'get_job_manager',
     'submit_background_job',
     'BackgroundJobManager',
