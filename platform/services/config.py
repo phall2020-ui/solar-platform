@@ -8,7 +8,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ALLOWED_ENVIRONMENTS = {"development", "staging", "production"}
@@ -73,6 +73,29 @@ class Settings(BaseSettings):
     juggle_api_key: str = Field(default="")
     nrel_api_key: str = Field(default="")
     solargis_api_key: str = Field(default="")
+
+    # Notion integration (asset register)
+    # Back-compat: existing repo scripts/workflows use NOTION_TOKEN and NOTION_DB_ID.
+    notion_integration_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("NOTION_INTEGRATION_TOKEN", "NOTION_TOKEN"),
+    )
+    notion_asset_database_id: str = Field(
+        default="",
+        validation_alias=AliasChoices("NOTION_ASSET_DATABASE_ID", "NOTION_DB_ID"),
+    )
+    notion_asset_sync_enabled: bool = False
+    notion_asset_cache_ttl_seconds: int = 300
+    notion_asset_plant_uid_field: str = "Plant UID"
+    notion_asset_alias_field: str = "Alias"
+
+    # Notion integration (irradiance DB — auto-created on first sync)
+    notion_irradiance_database_id: str = Field(default="", description="Auto-created if empty")
+    notion_page_id: str = Field(
+        default="",
+        description="Parent page for new Notion DBs",
+        validation_alias=AliasChoices("NOTION_PAGE_ID"),
+    )
 
     # Feature flags
     feature_live_mode: bool = True
@@ -158,6 +181,13 @@ class Settings(BaseSettings):
     def validate_live_poll_interval(cls, value: int) -> int:
         if value < 5 or value > 300:
             raise ValueError("live_poll_interval_seconds must be between 5 and 300")
+        return value
+
+    @field_validator("notion_asset_cache_ttl_seconds")
+    @classmethod
+    def validate_notion_asset_cache_ttl(cls, value: int) -> int:
+        if value < 0 or value > 3600:
+            raise ValueError("notion_asset_cache_ttl_seconds must be between 0 and 3600")
         return value
 
     @property
