@@ -240,7 +240,7 @@ def build_monthly_stats(
             continue
         if site not in totals:
             # Keep going; the database may contain rows for sites not in mapping.
-            totals[site] = {"inv_kwh": 0.0, "meter_kwh": 0.0}
+            totals[site] = {"inv_kwh": 0.0, "meter_kwh": 0.0, "portal_kwh": 0.0}
 
         dt = _extract_date(page, "Date")
         inv = _extract_number(page, "Juggle Inv (Daily)")
