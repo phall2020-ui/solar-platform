@@ -61,6 +61,23 @@ SYNC_SMTP_USE_TLS = _env("SYNC_SMTP_USE_TLS", "true").lower() == "true"
 SYNC_EMAIL_FROM = _env("SYNC_EMAIL_FROM", "")
 SYNC_EMAIL_TO = [x.strip() for x in _env("SYNC_EMAIL_TO", "").split(",") if x.strip()]
 
+def _append_github_step_summary(markdown: str) -> None:
+    """
+    Append markdown to GitHub Actions step summary when available.
+    Safe no-op outside Actions.
+    """
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(markdown)
+            if not markdown.endswith("\n"):
+                f.write("\n")
+    except Exception:
+        # Never fail the sync due to summary I/O issues.
+        pass
+
 # Load SolarEdge Keys
 SOLAREDGE_KEYS_JSON = _env('SOLAREDGE_KEYS_JSON', '{}')
 try:
@@ -139,9 +156,14 @@ def parse_args() -> argparse.Namespace:
                         help="Send end-of-run summary email.")
     parser.add_argument("--email-dry-run", action="store_true",
                         help="Print summary email instead of sending.")
+    parser.add_argument("--site", action="append", default=[],
+                        help="Restrict sync to this site name (exact match). Can be repeated.")
+    parser.add_argument("--site-contains", action="append", default=[],
+                        help="Restrict sync to sites containing this substring (case-insensitive). Can be repeated.")
     return parser.parse_args()
 
-def save_run_snapshot(summary: Dict[str, Any], run_mode: str, target_days: list[str]) -> Optional[str]:
+def save_run_snapshot(summary: Dict[str, Any], run_mode: str, target_days: list[str],
+                      details: Optional[Dict[str, Any]] = None) -> Optional[str]:
     if not target_days:
         return None
     os.makedirs(SYNC_SNAPSHOT_DIR, exist_ok=True)
@@ -155,6 +177,8 @@ def save_run_snapshot(summary: Dict[str, Any], run_mode: str, target_days: list[
         "period_end": target_days[-1],
         "summary": summary,
     }
+    if details:
+        payload["details"] = details
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
     return out_path
@@ -520,6 +544,24 @@ def has_any_data(day_maps):
     """Return True if any daily-map in the list contains at least one day."""
     return any(bool(day_map) for day_map in day_maps)
 
+def _top_mtd_outliers(site_totals: Dict[str, Dict[str, Any]], *, limit: int = 10) -> str:
+    candidates = []
+    for name, totals in site_totals.items():
+        meter = _safe_num(totals.get("meter_mtd"))
+        inv = _safe_num(totals.get("inv_mtd"))
+        if meter <= 0:
+            continue
+        diff = (inv - meter) / meter
+        candidates.append((abs(diff), diff, name, inv, meter, _safe_num(totals.get("platform_mtd"))))
+    candidates.sort(reverse=True)
+    lines = []
+    for _, diff, name, inv, meter, platform_mtd in candidates[: max(0, limit)]:
+        lines.append(
+            f"- {name}: inv={inv:.1f} kWh, meter={meter:.1f} kWh, "
+            f"platform={platform_mtd:.1f} kWh, diff={diff * 100.0:.1f}%"
+        )
+    return "\n".join(lines)
+
 def main():
     args = parse_args()
 
@@ -528,6 +570,19 @@ def main():
         sys.exit(1)
             
     mapping = load_sites_mapping()
+    if args.site or args.site_contains:
+        selected = {}
+        exact = set(args.site or [])
+        contains = [s.lower() for s in (args.site_contains or []) if s]
+        for name, info in mapping.items():
+            if name in exact:
+                selected[name] = info
+                continue
+            name_l = name.lower()
+            if any(token in name_l for token in contains):
+                selected[name] = info
+        mapping = selected
+        print(f"Site filter active: {len(mapping)} site(s) selected.")
 
     target_days, run_mode = resolve_target_days(
         mode=args.mode,
@@ -562,6 +617,7 @@ def main():
     skipped_inverter_only = []
     skipped_no_comparison_data = []
     site_errors = []
+    site_totals: Dict[str, Dict[str, Any]] = {}
     
     # Iterate ALL sites in mapping
     for name, info in mapping.items():
@@ -683,6 +739,18 @@ def main():
 
         if wrote_any_rows:
             synced_sites += 1
+            # Record end-of-range totals for snapshot/email reporting.
+            meter_mtd = cum_pv
+            inv_mtd = cum_inv
+            platform_mtd = cum_platform
+            diff_mtd = (inv_mtd - meter_mtd) / meter_mtd if meter_mtd > 0 else 0.0
+            site_totals[name] = {
+                "platform": platform,
+                "inv_mtd": round(inv_mtd, 2),
+                "meter_mtd": round(meter_mtd, 2),
+                "platform_mtd": round(platform_mtd, 2),
+                "diff_mtd": round(diff_mtd, 4),
+            }
 
     print("Sync complete.")
     summary = {
@@ -724,11 +792,41 @@ def main():
         for err in site_errors:
             print(f"    - {err}")
 
-    snapshot_path = save_run_snapshot(summary, run_mode, target_days)
+    snapshot_path = save_run_snapshot(
+        summary,
+        run_mode,
+        target_days,
+        details={
+            "skipped_no_juggle_mapping": skipped_no_juggle_mapping,
+            "skipped_inverter_only": skipped_inverter_only,
+            "skipped_no_comparison_data": skipped_no_comparison_data,
+            "site_errors": site_errors,
+            "site_totals": site_totals,
+        },
+    )
     if snapshot_path:
         print(f"Saved run snapshot: {snapshot_path}")
 
+    # Always write a concise report to the GitHub Actions step summary (if available).
+    _append_github_step_summary(
+        "\n".join([
+            "## Notion Sync Summary",
+            f"- Mode: `{run_mode}`",
+            f"- Range: `{start_date_str}` to `{end_date_str}`",
+            f"- Synced sites: `{synced_sites}`",
+            f"- Synced rows: `{synced_rows}`",
+            f"- Unchanged rows: `{unchanged_rows}`",
+            f"- Skipped (no Juggle mapping): `{len(skipped_no_juggle_mapping)}`",
+            f"- Skipped (inverter only): `{len(skipped_inverter_only)}`",
+            f"- Skipped (no comparison data): `{len(skipped_no_comparison_data)}`",
+            f"- Site errors: `{len(site_errors)}`",
+            f"- Snapshot: `{snapshot_path or 'n/a'}`",
+            "",
+        ])
+    )
+
     if args.send_email_summary:
+        outliers_md = _top_mtd_outliers(site_totals, limit=10)
         subject = (
             f"Notion Sync Summary: {start_date_str} to {end_date_str} "
             f"({run_mode})"
@@ -744,6 +842,15 @@ def main():
             f"Skipped (no comparison data): {len(skipped_no_comparison_data)}\n"
             f"Site errors: {len(site_errors)}\n"
             f"Snapshot: {snapshot_path or 'n/a'}\n"
+        )
+        if outliers_md:
+            body += "\nTop MTD diff outliers (abs %):\n" + outliers_md + "\n"
+        _append_github_step_summary(
+            "\n".join([
+                "### Top MTD Diff Outliers",
+                outliers_md or "_none_",
+                "",
+            ])
         )
         send_summary_email(
             subject=subject,

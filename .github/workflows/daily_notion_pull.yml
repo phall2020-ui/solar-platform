@@ -80,13 +80,34 @@ jobs:
           SYNC_EMAIL_TO: ${{ secrets.SYNC_EMAIL_TO }}
         run: |
           MODE="${{ github.event.inputs.mode || 'auto' }}"
-          EXTRA_ARGS="--mode ${MODE}"
+          DAY="$(date -u +%d | sed 's/^0//')"
+          GRACE_DAYS="${SYNC_MONTH_CLOSE_GRACE_DAYS:-3}"
 
           SEND_EMAIL_INPUT="${{ github.event.inputs.send_email_summary || 'false' }}"
+          EMAIL_ARGS=""
           if [ "$SEND_EMAIL_INPUT" = "true" ]; then
-            EXTRA_ARGS="$EXTRA_ARGS --send-email-summary"
-          elif [ "$(date -u +%d)" = "01" ]; then
-            EXTRA_ARGS="$EXTRA_ARGS --send-email-summary"
+            EMAIL_ARGS="--send-email-summary"
+          elif [ "$DAY" = "1" ]; then
+            EMAIL_ARGS="--send-email-summary"
           fi
 
-          python notion_sync.py $EXTRA_ARGS
+          # Month-close behavior:
+          # - During the first GRACE_DAYS of a new month, we finalize the previous month.
+          # - On days 2..GRACE_DAYS, we also sync current MTD so we don't miss early new-month days.
+          if [ "$MODE" = "auto" ] && [ "$DAY" -le "$GRACE_DAYS" ]; then
+            python notion_sync.py --mode previous_month $EMAIL_ARGS
+            if [ "$DAY" -ge 2 ]; then
+              python notion_sync.py --mode current_mtd
+            fi
+          else
+            python notion_sync.py --mode "$MODE" $EMAIL_ARGS
+          fi
+
+      - name: Upload sync snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: notion-sync-snapshots
+          path: tools/inverter-data-juggle/sync_snapshots/*.json
+          if-no-files-found: ignore
+          retention-days: 30
