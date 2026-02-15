@@ -53,7 +53,19 @@ class CacheLayer:
         if backend == "sqlite" or backend == "duckdb":
             if not db_path:
                 raise ValueError("db_path required for duckdb backend")
-            self._init_duckdb()
+            try:
+                self._init_duckdb()
+            except Exception as e:
+                # The app is designed to remain usable while a long-running writer
+                # (e.g. `cli/backfill.py`) holds an exclusive DuckDB lock. In that
+                # case, initializing the cache table/indexes would fail; fall back
+                # to in-memory caching rather than crashing the UI.
+                logger.warning(
+                    "duckdb_cache_init_failed_falling_back_to_memory: %s",
+                    e,
+                )
+                self.backend = "memory"
+                self.db_path = None
     
     def _init_duckdb(self) -> None:
         """Initialize DuckDB cache table."""

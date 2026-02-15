@@ -15,17 +15,23 @@ logger = logging.getLogger(__name__)
 def render():
     """Render the legacy Plant Management & Data Fetch page."""
     logger.info("Rendering Plant Management page")
+    st.title("🌱 Plant Management")
+    st.markdown("Manage sites and fetch operational data.")
+
     orch = legacy_toolkit.get_orchestrator()
     if not orch:
-        st.error("Orchestrator not available.")
+        st.warning(
+            "Plant Management is unavailable because the legacy Solar Toolkit orchestrator could not be loaded."
+        )
+        st.caption(
+            "If you need this feature, ensure the legacy `solar_toolkit` package is present under "
+            "`platform/Solar Toolkit/solar_toolkit` and is importable in the active environment."
+        )
         return
 
     # --- Pre-computation (Legacy Global) ---
     plant_list = orch.get_plants()
     plant_aliases = [p['alias'] for p in plant_list]
-
-    st.title("🌱 Plant Management")
-    st.markdown("Manage sites and fetch operational data.")
 
     # --- Section 1: Plants & Data Fetch Content ---
     

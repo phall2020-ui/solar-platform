@@ -15,9 +15,26 @@ from solar_platform.services import legacy_toolkit
 
 def render():
     """Render the legacy POA Import page."""
+    # Render the page chrome even if the legacy toolkit isn't available, so
+    # navigation works and the user gets a clear (non-crashing) explanation.
+    st.header("Import SolarGIS POA Data")
+    st.markdown(
+        """
+        Import POA (Plane of Array) irradiance data from SolarGIS CSV files.
+        POA data covers the entire system and will be stored separately from inverter readings
+        but can be joined for analysis using aligned timestamps.
+        """
+    )
+
     orch = legacy_toolkit.get_orchestrator()
     if not orch:
-        st.error("Orchestrator not available.")
+        st.warning(
+            "POA Import is unavailable because the legacy Solar Toolkit orchestrator could not be loaded."
+        )
+        st.caption(
+            "If you need this feature, ensure the legacy `solar_toolkit` package is present under "
+            "`platform/Solar Toolkit/solar_toolkit` and is importable in the active environment."
+        )
         return
 
     # Helper function from legacy code
@@ -41,13 +58,6 @@ def render():
     plant_aliases = [p['alias'] for p in plant_list]
     
     # --- UI Start ---
-    st.header("Import SolarGIS POA Data")
-    st.markdown("""
-    Import POA (Plane of Array) irradiance data from SolarGIS CSV files. 
-    POA data covers the entire system and will be stored separately from inverter readings 
-    but can be joined for analysis using aligned timestamps.
-    """)
-    
     # Create sub-tabs for single and bulk import
     import_mode = st.radio("Import Mode", ["Upload File(s)", "From Folder Path"], horizontal=True)
     
