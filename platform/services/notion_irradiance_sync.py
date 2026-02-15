@@ -43,6 +43,9 @@ DB_PROPERTIES: dict[str, dict] = {
     "kWp":                          {"number": {"format": "number"}},
     "Actual Irradiance (kWh/m²)":   {"number": {"format": "number"}},
     "Forecast Irradiance (kWh/m²)": {"number": {"format": "number"}},
+    "SolarGIS GTI (kWh/m²)":        {"number": {"format": "number"}},
+    "SolarGIS GHI (kWh/m²)":        {"number": {"format": "number"}},
+    "SG vs Actual (%)":             {"number": {"format": "percent"}},
     "Irr Variance (%)":             {"number": {"format": "percent"}},
     "Actual Gen (kWh)":             {"number": {"format": "number"}},
     "Forecast Gen (kWh)":           {"number": {"format": "number"}},
@@ -131,6 +134,19 @@ def create_database(token: str, parent_page_id: str) -> str:
     return db_id
 
 
+def ensure_schema(token: str, db_id: str) -> None:
+    """Ensure the Notion database has all required columns (adds missing ones)."""
+    body = _request("GET", f"{_API}/databases/{db_id}", token)
+    existing = set(body.get("properties", {}).keys())
+    missing = {k: v for k, v in DB_PROPERTIES.items() if k not in existing}
+    if missing:
+        print(f"  Adding {len(missing)} new columns: {', '.join(missing.keys())}")
+        _request(
+            "PATCH", f"{_API}/databases/{db_id}", token,
+            json_body={"properties": missing},
+        )
+
+
 def query_existing_rows(token: str, db_id: str) -> dict[tuple[str, str], str]:
     """Return {(site, month): page_id} for all existing rows."""
     index: dict[tuple[str, str], str] = {}
@@ -217,6 +233,9 @@ def _build_properties(row: dict[str, Any]) -> dict[str, Any]:
         "Forecast Gen (kWh)":           "forecast_gen",
         "Gen Variance (%)":             "gen_variance_pct",
         "kWh/kWp":                      "kwh_per_kwp",
+        "SolarGIS GTI (kWh/m²)":        "solargis_gti",
+        "SolarGIS GHI (kWh/m²)":        "solargis_ghi",
+        "SG vs Actual (%)":             "sg_vs_actual_pct",
         "Actual PR (%)":                "actual_pr",
         "Availability (%)":             "availability",
     }
@@ -234,7 +253,10 @@ def _build_properties(row: dict[str, Any]) -> dict[str, Any]:
 # ── Data extraction from DuckDB ─────────────────────────────────────────
 
 def load_irradiance_data() -> list[dict[str, Any]]:
-    """Query solar_data from DuckDB and compute derived metrics."""
+    """Query solar_data from DuckDB, merge SolarGIS aggregates, and compute derived metrics."""
+    import pandas as pd
+    from services.solargis_monthly_aggregator import aggregate_solargis_monthly
+
     settings = get_settings()
     db_path = str(settings.db_path)
 
@@ -257,6 +279,20 @@ def load_irradiance_data() -> list[dict[str, Any]]:
         """).fetchdf()
     finally:
         conn.close()
+
+    # Load SolarGIS 15-min aggregated data
+    try:
+        sg_df = aggregate_solargis_monthly()
+        sg_lookup: dict[tuple[str, str], dict] = {}
+        for _, sg in sg_df.iterrows():
+            sg_lookup[(sg["Site"], sg["Month"])] = {
+                "solargis_gti": sg["SolarGIS GTI (kWh/m²)"],
+                "solargis_ghi": sg["SolarGIS GHI (kWh/m²)"],
+            }
+        print(f"  Loaded {len(sg_lookup)} SolarGIS site-months")
+    except Exception as exc:
+        print(f"  WARN: SolarGIS data unavailable: {exc}")
+        sg_lookup = {}
 
     rows: list[dict[str, Any]] = []
     for _, r in df.iterrows():
@@ -285,12 +321,25 @@ def load_irradiance_data() -> list[dict[str, Any]]:
         if avail is not None and avail > 1:
             avail = avail / 100.0
 
+        # Merge SolarGIS data
+        sg = sg_lookup.get((r["Site"], r["Date"]), {})
+        sg_gti = sg.get("solargis_gti")
+        sg_ghi = sg.get("solargis_ghi")
+
+        # SolarGIS vs Actual variance
+        sg_vs_actual = None
+        if sg_gti and actual_irr and actual_irr > 0:
+            sg_vs_actual = (sg_gti - actual_irr) / actual_irr
+
         rows.append({
             "Site": r["Site"],
             "Month": r["Date"],  # e.g. "Apr-25"
             "kWp": r["kWp"] if r["kWp"] == r["kWp"] else None,
             "actual_irr": actual_irr,
             "forecast_irr": forecast_irr,
+            "solargis_gti": sg_gti,
+            "solargis_ghi": sg_ghi,
+            "sg_vs_actual_pct": sg_vs_actual,
             "irr_variance_pct": irr_var,
             "actual_gen": actual_gen,
             "forecast_gen": forecast_gen,
@@ -349,6 +398,11 @@ def sync_irradiance_to_notion(*, dry_run: bool = False) -> dict[str, int]:
         print("Creating new Notion database...")
         db_id = create_database(token, parent_page)
         # Persist the new DB ID to .env for future runs
+        _append_env("NOTION_IRRADIANCE_DATABASE_ID", db_id)
+        print(f"  Saved DB ID to .env")
+    else:
+        # Ensure schema is up to date (adds any new columns like SolarGIS)
+        ensure_schema(token, db_id)
         _append_env("NOTION_IRRADIANCE_DATABASE_ID", db_id)
         print(f"  Saved DB ID to .env")
 
