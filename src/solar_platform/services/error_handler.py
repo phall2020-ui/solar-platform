@@ -2,6 +2,7 @@
 Centralized Error Handling System
 Provides user-friendly error messages, recovery suggestions, and error tracking.
 """
+import logging
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -9,9 +10,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-import streamlit as st
-
 from solar_platform.db.utils import get_connection
+
+logger = logging.getLogger(__name__)
 
 
 class ErrorSeverity(Enum):
@@ -223,38 +224,26 @@ class AppErrorHandler:
         return error_ctx
     
     def _display_error(self, error_ctx: ErrorContext, show_traceback: bool = False) -> None:
-        """Display error to user in Streamlit UI."""
-        severity_icons = {
-            ErrorSeverity.INFO: "ℹ️",
-            ErrorSeverity.WARNING: "⚠️",
-            ErrorSeverity.ERROR: "❌",
-            ErrorSeverity.CRITICAL: "🚨"
-        }
-        
-        icon = severity_icons.get(error_ctx.severity, "⚠️")
-        
-        # Display based on severity
-        if error_ctx.severity == ErrorSeverity.CRITICAL:
-            st.error(f"{icon} **{error_ctx.user_message}**")
-        elif error_ctx.severity == ErrorSeverity.ERROR:
-            st.error(f"{icon} {error_ctx.user_message}")
-        elif error_ctx.severity == ErrorSeverity.WARNING:
-            st.warning(f"{icon} {error_ctx.user_message}")
-        else:
-            st.info(f"{icon} {error_ctx.user_message}")
-        
-        # Show recovery actions
+        """Log error using stdlib logging (framework-agnostic)."""
+        log_func = {
+            ErrorSeverity.INFO: logger.info,
+            ErrorSeverity.WARNING: logger.warning,
+            ErrorSeverity.ERROR: logger.error,
+            ErrorSeverity.CRITICAL: logger.critical,
+        }.get(error_ctx.severity, logger.warning)
+
+        log_func("%s", error_ctx.user_message)
+
+        # Log recovery actions
         if error_ctx.recovery_actions:
-            with st.expander("💡 How to fix this"):
-                for action in error_ctx.recovery_actions:
-                    st.write(f"• {action}")
-        
-        # Show technical details if requested
+            for action in error_ctx.recovery_actions:
+                logger.info("  Recovery: %s", action)
+
+        # Log technical details if requested
         if show_traceback and error_ctx.traceback:
-            with st.expander("🔧 Technical Details (for developers)"):
-                st.code(error_ctx.traceback)
-                if error_ctx.context:
-                    st.json(error_ctx.context)
+            logger.debug("Traceback:\n%s", error_ctx.traceback)
+            if error_ctx.context:
+                logger.debug("Context: %s", error_ctx.context)
     
     def _log_error(self, error_ctx: ErrorContext) -> None:
         """Log error to database."""
@@ -379,8 +368,7 @@ def safe_execute(
         if error_handler:
             error_handler.handle_error(error_type, e, context, show_traceback)
         else:
-            # Fallback to basic streamlit error
-            st.error(f"Error: {str(e)}")
+            logger.error("Error: %s", e)
         return None
 
 

@@ -2,13 +2,14 @@
 Legacy Solar Toolkit Services
 Wraps the initialization and shared utilities from the original Solar Toolkit app.
 """
+import functools
 import io
 import logging
 import sys
 
-import streamlit as st
-
 from solar_platform.config import config
+
+logger = logging.getLogger(__name__)
 
 # Ensure toolkit path is available for imports
 toolkit_path = str(config.SOLAR_TOOLKIT_PATH)
@@ -39,7 +40,7 @@ def initialize_logging():
     logging.getLogger("solar_toolkit").addHandler(capture_handler)
     logging.getLogger().addHandler(capture_handler)
 
-@st.cache_resource
+@functools.lru_cache(maxsize=1)
 def get_orchestrator():
     """Initializes the Orchestrator (cached resource)."""
     if not LEGACY_AVAILABLE: return None
@@ -50,23 +51,6 @@ def clear_logs():
     log_capture_string.truncate(0)
     log_capture_string.seek(0)
     
-def display_logs():
-    """Displays the captured log output in an expander."""
-    st.markdown("### 📜 Logs")
-    with st.expander("Show Detailed Logs"):
-        st.code(log_capture_string.getvalue())
-
-def load_css():
-    """Injects the legacy CSS."""
-    st.markdown("""
-        <style>
-        /* [Legacy CSS simplified for unified app integration] */
-        .stTabs [data-baseweb="tab-list"] { gap: 24px; }
-        .stButton > button[kind="primary"] { border: none; }
-        div[data-testid="stMetric"] {
-            background-color: #ffffff;
-            border: 1px solid #e2e8f0;
-            box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05);
-        }
-        </style>
-    """, unsafe_allow_html=True)
+def get_logs() -> str:
+    """Return the captured log output as a string."""
+    return log_capture_string.getvalue()

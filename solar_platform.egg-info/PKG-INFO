@@ -1,0 +1,38 @@
+Metadata-Version: 2.4
+Name: solar-platform
+Version: 1.1.0
+Summary: Solar portfolio management platform
+Requires-Python: >=3.11
+Requires-Dist: pandas~=2.3
+Requires-Dist: numpy~=2.4
+Requires-Dist: python-dotenv~=1.2
+Requires-Dist: requests~=2.32
+Requires-Dist: pydantic~=2.12
+Requires-Dist: structlog~=25.5
+Requires-Dist: duckdb~=1.4
+Requires-Dist: python-dateutil~=2.9
+Requires-Dist: pytz~=2025.2
+Requires-Dist: pvlib~=0.13
+Requires-Dist: scipy~=1.16
+Requires-Dist: pyarrow~=22.0
+Requires-Dist: fastparquet~=2025.12
+Requires-Dist: openpyxl~=3.1
+Requires-Dist: bcrypt>=4.0.0
+Requires-Dist: cryptography~=46.0
+Requires-Dist: PyJWT~=2.10
+Provides-Extra: ui
+Requires-Dist: streamlit~=1.52; extra == "ui"
+Requires-Dist: plotly~=6.5; extra == "ui"
+Requires-Dist: kaleido~=1.2; extra == "ui"
+Requires-Dist: matplotlib~=3.10; extra == "ui"
+Provides-Extra: api
+Requires-Dist: fastapi>=0.115; extra == "api"
+Requires-Dist: uvicorn>=0.34; extra == "api"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-cov>=5.0; extra == "dev"
+Requires-Dist: ruff>=0.8; extra == "dev"
+Requires-Dist: mypy>=1.13; extra == "dev"
+Requires-Dist: pre-commit>=4.0; extra == "dev"
+Provides-Extra: all
+Requires-Dist: solar-platform[api,dev,ui]; extra == "all"

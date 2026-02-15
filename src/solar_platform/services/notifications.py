@@ -3,11 +3,12 @@ Notification Service for Solar Portfolio Manager.
 Provides alerts, notifications, and threshold-based monitoring.
 """
 import json
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Any
 
-import streamlit as st
+logger = logging.getLogger(__name__)
 
 
 class NotificationType:
@@ -387,14 +388,15 @@ class NotificationService:
         return history
 
 
-# Streamlit integration
-def init_notifications() -> None:
-    """Initialize notification service in session state."""
-    if "notification_service" not in st.session_state:
-        st.session_state.notification_service = NotificationService()
+# ---------------------------------------------------------------------------
+# Framework-agnostic singleton
+# ---------------------------------------------------------------------------
+_notification_service: NotificationService | None = None
 
 
 def get_notification_service() -> NotificationService:
-    """Get notification service instance."""
-    init_notifications()
-    return st.session_state.notification_service
+    """Get or create the module-level NotificationService singleton."""
+    global _notification_service
+    if _notification_service is None:
+        _notification_service = NotificationService()
+    return _notification_service

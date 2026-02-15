@@ -1,0 +1,5 @@
+[console_scripts]
+solar-api = api.main:serve
+solar-app = app.main:run
+solar-backfill = cli.backfill:main
+solar-pull = cli.data_pull:main

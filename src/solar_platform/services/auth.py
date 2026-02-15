@@ -10,7 +10,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import bcrypt
-import streamlit as st
 
 logger = logging.getLogger(__name__)
 
@@ -361,42 +360,49 @@ class AuthService:
         return logs
 
 
-# Streamlit integration helpers
-def init_session_auth():
-    """Initialize authentication in Streamlit session state."""
-    if "user" not in st.session_state:
-        st.session_state.user = None
-    if "auth_service" not in st.session_state:
-        st.session_state.auth_service = AuthService()
+# ---------------------------------------------------------------------------
+# Framework-agnostic session helpers (module-level state)
+# ---------------------------------------------------------------------------
+_current_user: User | None = None
+_auth_service: AuthService | None = None
+
+
+def _get_auth_service() -> AuthService:
+    """Get or create the module-level AuthService singleton."""
+    global _auth_service
+    if _auth_service is None:
+        _auth_service = AuthService()
+    return _auth_service
+
+
+def set_current_user(user: User | None) -> None:
+    """Set the currently authenticated user (called by UI layer)."""
+    global _current_user
+    _current_user = user
 
 
 def get_current_user() -> User | None:
     """Get currently logged-in user."""
-    init_session_auth()
-    return st.session_state.get("user")
+    return _current_user
 
 
-def require_login():
-    """Require user to be logged in. Redirect to login if not."""
-    init_session_auth()
-    if st.session_state.user is None:
-        from components.auth_ui import render_login_page
-        render_login_page()
-        st.stop()
+def require_login() -> None:
+    """Raise if no user is logged in."""
+    if _current_user is None:
+        raise PermissionError("Login required")
 
 
-def require_permission(permission: str):
-    """Require user to have specific permission."""
-    user = get_current_user()
-    if user is None or not user.has_permission(permission):
-        st.error(f"You do not have permission to {permission}")
-        st.stop()
+def require_permission(permission: str) -> None:
+    """Raise if the current user lacks *permission*."""
+    if _current_user is None or not _current_user.has_permission(permission):
+        raise PermissionError(f"You do not have permission to {permission}")
 
 
-def logout():
+def logout() -> None:
     """Log out current user."""
-    if st.session_state.user:
-        st.session_state.auth_service._log_action(
-            st.session_state.user.user_id, "logout", "system"
+    global _current_user
+    if _current_user is not None:
+        _get_auth_service()._log_action(
+            _current_user.user_id, "logout", "system"
         )
-    st.session_state.user = None
+    _current_user = None

@@ -181,27 +181,29 @@ class AccessControlService:
 # ---------------------------------------------------------------------------
 # Streamlit helper
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Framework-agnostic current-user permissions
+# ---------------------------------------------------------------------------
+_current_user_id: str | None = None
+_permissions_cache: dict[str, UserPermissions] = {}
+
+
+def set_current_user_id(user_id: str | None) -> None:
+    """Set the current user id (called by the UI/session layer)."""
+    global _current_user_id
+    _current_user_id = user_id
+
+
 def get_current_permissions() -> UserPermissions | None:
-    """Read permissions from ``st.session_state`` if Streamlit is available.
-
-    Returns ``None`` when Streamlit is not installed or no user is logged in.
-    """
-    try:
-        import streamlit as st  # type: ignore[import-untyped]
-    except ImportError:
+    """Return permissions for the current user, or ``None`` if unset."""
+    if _current_user_id is None:
         return None
 
-    user_id = st.session_state.get("user_id") or st.session_state.get("username")
-    if not user_id:
-        return None
-
-    # Cache in session state to avoid repeated DB calls
-    cache_key = f"_acl_permissions_{user_id}"
-    cached = st.session_state.get(cache_key)
+    cached = _permissions_cache.get(_current_user_id)
     if cached is not None:
-        return cached  # type: ignore[return-value]
+        return cached
 
     svc = AccessControlService()
-    perms = svc.get_permissions(str(user_id))
-    st.session_state[cache_key] = perms
+    perms = svc.get_permissions(_current_user_id)
+    _permissions_cache[_current_user_id] = perms
     return perms
