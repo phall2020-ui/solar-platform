@@ -286,6 +286,8 @@ def build_email_body(
     site_errors: int,
     top_outliers: List[Tuple[str, float, str]],
     site_rows: List[Tuple[str, float, float, float, float, str]],
+    *,
+    omitted_no_data_sites: int = 0,
 ) -> str:
     """
     Body is stored as a rich_text string; downstream automation can treat it as HTML.
@@ -308,6 +310,8 @@ def build_email_body(
         lines.append(f"- {site}: {pct:+.1f}% | {link_part}")
     lines.append("")
     lines.append("Monthly totals by site:")
+    if omitted_no_data_sites:
+        lines.append(f"(Omitted {omitted_no_data_sites} sites with no meter/inverter/portal data for the month)")
 
     # Important: keep the whole table as a single string so the surrounding
     # "<br>" join doesn't insert breaks inside table markup.
@@ -477,7 +481,7 @@ def main() -> None:
     site_errors = 0  # Reserved for future: pulling from APIs; currently summarizing Notion DB only.
 
     outlier_candidates: List[Tuple[float, str, float, str]] = []
-    site_rows: List[Tuple[str, float, float, float, float, str]] = []
+    site_rows_all: List[Tuple[str, float, float, float, float, str]] = []
     for site in sites:
         t = totals.get(site) or {"inv_kwh": 0.0, "meter_kwh": 0.0, "portal_kwh": 0.0, "diff_frac": 0.0}
         inv = float(t.get("inv_kwh") or 0.0)
@@ -486,7 +490,7 @@ def main() -> None:
         diff = float(t.get("diff_frac") or 0.0)
         url = page_urls.get(site, "")
 
-        site_rows.append((site, meter, inv, portal, diff, url))
+        site_rows_all.append((site, meter, inv, portal, diff, url))
 
         if inv > 0 and meter > 0:
             synced += 1
@@ -495,6 +499,12 @@ def main() -> None:
             inverter_only += 1
         else:
             no_comparison += 1
+
+    # Filter the rendered table to only rows with any non-zero data.
+    site_rows = [r for r in site_rows_all if (r[1] > 0 or r[2] > 0 or r[3] > 0)]
+    omitted_no_data_sites = len(site_rows_all) - len(site_rows)
+    site_rows.sort(key=lambda x: x[0])
+    print(f"Monthly table rows included: {len(site_rows)} (of {len(site_rows_all)} mapped sites); omitted={omitted_no_data_sites}")
 
     outlier_candidates.sort(reverse=True)
     top = outlier_candidates[: max(0, int(args.top_n))]
@@ -511,6 +521,7 @@ def main() -> None:
         site_errors=site_errors,
         top_outliers=top_outliers,
         site_rows=site_rows,
+        omitted_no_data_sites=omitted_no_data_sites,
     )
 
     name = f"{run_type} Monthly Summary {ym}"

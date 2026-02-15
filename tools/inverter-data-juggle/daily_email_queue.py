@@ -317,10 +317,10 @@ def build_body(
     lines.append(f"Daily summary for {report_day.isoformat()}")
     lines.append("")
     lines.append("Previous day (per-site):")
-    lines.append(_table_html(daily_rows))
+    lines.append(_table_html(daily_rows) if daily_rows else "No sites with data for previous day.")
     lines.append("")
     lines.append(f"Month-to-date ({month_name} {month_start.year}: {month_start.isoformat()} to {report_day.isoformat()}):")
-    lines.append(_table_html(mtd_rows))
+    lines.append(_table_html(mtd_rows) if mtd_rows else "No sites with data for month-to-date.")
     lines.append("")
     lines.append(f"Synced Sites (daily): {synced_daily}")
     lines.append(f"Inverter-only Sites (daily): {inverter_only_daily}")
@@ -394,14 +394,13 @@ def main() -> None:
     no_comparison = 0
     site_errors = 0
 
-    daily_rows: List[Tuple[str, float, float, float, Optional[float], str]] = []
-    mtd_rows: List[Tuple[str, float, float, float, Optional[float], str]] = []
+    daily_rows_all: List[Tuple[str, float, float, float, Optional[float], str]] = []
+    mtd_rows_all: List[Tuple[str, float, float, float, Optional[float], str]] = []
 
     for site in sites:
         r = by_site.get(site)
         if not r:
-            daily_rows.append((site, 0.0, 0.0, 0.0, None, ""))
-            mtd_rows.append((site, 0.0, 0.0, 0.0, None, ""))
+            # No Notion row for this site/day (omit from table; still count for coverage).
             no_comparison += 1
             continue
 
@@ -416,8 +415,8 @@ def main() -> None:
         diff_d = (inv_d - meter_d) / meter_d if (meter_d > 0 and inv_d > 0) else None
         diff_m = (inv_m - meter_m) / meter_m if (meter_m > 0 and inv_m > 0) else None
 
-        daily_rows.append((site, meter_d, inv_d, portal_d, diff_d, url))
-        mtd_rows.append((site, meter_m, inv_m, portal_m, diff_m, url))
+        daily_rows_all.append((site, meter_d, inv_d, portal_d, diff_d, url))
+        mtd_rows_all.append((site, meter_m, inv_m, portal_m, diff_m, url))
 
         if meter_d > 0 and inv_d > 0:
             synced += 1
@@ -425,6 +424,15 @@ def main() -> None:
             inverter_only += 1
         else:
             no_comparison += 1
+
+    # Filter tables to only sites with any meaningful data to avoid giant 0.0 tables.
+    daily_rows = [r for r in daily_rows_all if (r[1] > 0 or r[2] > 0 or r[3] > 0)]
+    mtd_rows = [r for r in mtd_rows_all if (r[1] > 0 or r[2] > 0 or r[3] > 0)]
+    daily_rows.sort(key=lambda x: x[0])
+    mtd_rows.sort(key=lambda x: x[0])
+
+    print(f"Daily table rows included: {len(daily_rows)} (of {len(daily_rows_all)} sites with Notion rows)")
+    print(f"MTD table rows included: {len(mtd_rows)} (of {len(mtd_rows_all)} sites with Notion rows)")
 
     subject = build_subject(run_type, report_day)
     body = build_body(
@@ -464,4 +472,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
