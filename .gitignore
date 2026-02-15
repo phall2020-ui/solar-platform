@@ -53,3 +53,6 @@ config.yml
 # Environment files (defense in depth)
 .env
 **/.env
+
+# Notion sync snapshots
+tools/inverter-data-juggle/sync_snapshots/

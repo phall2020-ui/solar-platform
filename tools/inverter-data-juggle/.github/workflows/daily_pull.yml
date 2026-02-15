@@ -5,6 +5,15 @@ on:
     # Run at 06:00 UTC every day
     - cron: '0 6 * * *'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Sync mode'
+        required: false
+        default: 'auto'
+      send_email_summary:
+        description: 'Send summary email at end of run'
+        required: false
+        default: 'false'
 
 jobs:
   sync-data:
@@ -12,12 +21,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
+        python-version: '3.11'
 
     - name: Install dependencies
       run: |
@@ -58,4 +67,21 @@ jobs:
         NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
         NOTION_DB_ID: ${{ secrets.NOTION_DB_ID }}
         SOLAREDGE_KEYS_JSON: ${{ secrets.SOLAREDGE_KEYS_JSON }}
-      run: python notion_sync.py
+        SYNC_SMTP_SERVER: ${{ secrets.SYNC_SMTP_SERVER }}
+        SYNC_SMTP_PORT: ${{ secrets.SYNC_SMTP_PORT }}
+        SYNC_SMTP_USERNAME: ${{ secrets.SYNC_SMTP_USERNAME }}
+        SYNC_SMTP_PASSWORD: ${{ secrets.SYNC_SMTP_PASSWORD }}
+        SYNC_SMTP_USE_TLS: ${{ secrets.SYNC_SMTP_USE_TLS }}
+        SYNC_EMAIL_FROM: ${{ secrets.SYNC_EMAIL_FROM }}
+        SYNC_EMAIL_TO: ${{ secrets.SYNC_EMAIL_TO }}
+      run: |
+        EXTRA_ARGS="--mode ${{ github.event.inputs.mode || 'auto' }}"
+
+        SEND_EMAIL_INPUT="${{ github.event.inputs.send_email_summary || 'false' }}"
+        if [ "$SEND_EMAIL_INPUT" = "true" ]; then
+          EXTRA_ARGS="$EXTRA_ARGS --send-email-summary"
+        elif [ "$(date -u +%d)" = "01" ]; then
+          EXTRA_ARGS="$EXTRA_ARGS --send-email-summary"
+        fi
+
+        python notion_sync.py $EXTRA_ARGS

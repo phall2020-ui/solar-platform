@@ -16,7 +16,7 @@ import json
 import time
 import smtplib
 import requests
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Dict, Any, Optional, Tuple
@@ -135,11 +135,11 @@ def save_run_snapshot(summary: Dict[str, Any], run_mode: str, target_days: list[
     if not target_days:
         return None
     os.makedirs(SYNC_SNAPSHOT_DIR, exist_ok=True)
-    run_ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    run_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     file_name = f"{target_days[0]}_to_{target_days[-1]}_{run_mode}_{run_ts}.json"
     out_path = os.path.join(SYNC_SNAPSHOT_DIR, file_name)
     payload = {
-        "generated_at_utc": datetime.utcnow().isoformat() + "Z",
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "run_mode": run_mode,
         "period_start": target_days[0],
         "period_end": target_days[-1],
