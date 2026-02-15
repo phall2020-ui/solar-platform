@@ -184,10 +184,10 @@ class TestFullAlertFlow:
 
     def test_alert_engine_no_data_rule(self, alert_db):
         """Full E2E: AlertEngine evaluates no_data rule for plant with no readings."""
-        with patch("services.alerts.engine.ClippingEngine"), \
-             patch("services.alerts.engine.CurtailmentEngine"), \
-             patch("services.alerts.engine.FoulingEngine"), \
-             patch("services.alerts.engine.ThermalLossEngine"):
+        with patch("solar_platform.alerts.engine.ClippingEngine"), \
+             patch("solar_platform.alerts.engine.CurtailmentEngine"), \
+             patch("solar_platform.alerts.engine.FoulingEngine"), \
+             patch("solar_platform.alerts.engine.ThermalLossEngine"):
             from solar_platform.alerts.engine import AlertEngine
             engine = AlertEngine(db_engine=alert_db)
             # uid-002 has no readings

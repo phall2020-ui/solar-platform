@@ -63,7 +63,7 @@ class TestDataGap:
 
 @pytest.mark.unit
 class TestGapDetector:
-    @patch("services.data_quality.gap_detection.get_engine")
+    @patch("solar_platform.data_quality.gap_detection.get_engine")
     def test_detect_gaps_no_readings_table(self, mock_get_engine):
         # Arrange
         mock_engine = MagicMock()
@@ -81,7 +81,7 @@ class TestGapDetector:
         # Assert
         assert gaps == []
 
-    @patch("services.data_quality.gap_detection.get_engine")
+    @patch("solar_platform.data_quality.gap_detection.get_engine")
     def test_detect_gaps_empty_result_entire_window_is_gap(self, mock_get_engine):
         # Arrange
         mock_engine = MagicMock()
@@ -104,7 +104,7 @@ class TestGapDetector:
         assert gaps[0].start == start
         assert gaps[0].end == end
 
-    @patch("services.data_quality.gap_detection.get_engine")
+    @patch("solar_platform.data_quality.gap_detection.get_engine")
     def test_detect_gaps_inter_reading_gap(self, mock_get_engine):
         # Arrange
         mock_engine = MagicMock()
@@ -128,7 +128,7 @@ class TestGapDetector:
         # Assert — should detect the inter-reading gap at minimum
         assert len(gaps) >= 1
 
-    @patch("services.data_quality.gap_detection.get_engine")
+    @patch("solar_platform.data_quality.gap_detection.get_engine")
     def test_daily_completeness_no_table(self, mock_get_engine):
         mock_engine = MagicMock()
         mock_engine.table_exists.return_value = False
@@ -147,7 +147,7 @@ class TestGapDetector:
         assert df.empty
         assert "completeness_pct" in df.columns
 
-    @patch("services.data_quality.gap_detection.get_engine")
+    @patch("solar_platform.data_quality.gap_detection.get_engine")
     def test_daily_completeness_with_data(self, mock_get_engine):
         mock_engine = MagicMock()
         mock_engine.table_exists.return_value = True

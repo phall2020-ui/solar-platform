@@ -225,7 +225,7 @@ class TestGapDetection:
     """Test GapDetector against DuckDB with readings containing gaps."""
 
     def test_detect_gaps_finds_gap(self, dq_engine):
-        with patch("services.data_quality.gap_detection.get_engine", return_value=dq_engine):
+        with patch("solar_platform.data_quality.gap_detection.get_engine", return_value=dq_engine):
             detector = GapDetector()
             # Use naive datetimes to match DuckDB TIMESTAMP (tz-naive)
             gaps = detector.detect_gaps(
@@ -241,7 +241,7 @@ class TestGapDetection:
         assert any(g.duration_minutes >= 60 for g in medium_gaps)
 
     def test_detect_gaps_empty_plant(self, dq_engine):
-        with patch("services.data_quality.gap_detection.get_engine", return_value=dq_engine):
+        with patch("solar_platform.data_quality.gap_detection.get_engine", return_value=dq_engine):
             detector = GapDetector()
             gaps = detector.detect_gaps(
                 plant_uid="uid-nonexistent",
@@ -254,7 +254,7 @@ class TestGapDetection:
         assert gaps[0].severity == GapSeverity.LONG
 
     def test_daily_completeness(self, dq_engine):
-        with patch("services.data_quality.gap_detection.get_engine", return_value=dq_engine):
+        with patch("solar_platform.data_quality.gap_detection.get_engine", return_value=dq_engine):
             detector = GapDetector()
             df = detector.daily_completeness(
                 plant_uid="uid-001",

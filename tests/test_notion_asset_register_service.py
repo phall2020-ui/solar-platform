@@ -80,7 +80,7 @@ def test_get_asset_register_parses_rows(monkeypatch: pytest.MonkeyPatch) -> None
     def fake_post(*args, **kwargs):  # noqa: ANN002, ANN003
         return FakeResponse()
 
-    monkeypatch.setattr("services.notion_asset_register_service.httpx.post", fake_post)
+    monkeypatch.setattr("solar_platform.services.notion_asset_register_service.httpx.post", fake_post)
 
     service = NotionAssetRegisterService(settings=settings)
     rows = service.get_asset_register(force_refresh=True)

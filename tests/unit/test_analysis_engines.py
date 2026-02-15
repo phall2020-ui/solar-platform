@@ -74,7 +74,7 @@ class TestAnalysisResult:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestClippingEngine:
-    @patch("services.analysis.clipping.ReadingsRepository")
+    @patch("solar_platform.analysis.clipping.ReadingsRepository")
     def test_no_readings(self, MockRepo):
         mock_repo = MagicMock()
         mock_repo.get_readings.return_value = pd.DataFrame()
@@ -87,7 +87,7 @@ class TestClippingEngine:
         assert result.analysis_type == "clipping"
         assert "No readings" in result.warnings[0]
 
-    @patch("services.analysis.clipping.ReadingsRepository")
+    @patch("solar_platform.analysis.clipping.ReadingsRepository")
     def test_with_data(self, MockRepo):
         n = 200
         times = pd.date_range("2025-01-01", periods=n, freq="15min")
@@ -110,7 +110,7 @@ class TestClippingEngine:
         assert "clipping_rate_pct" in result.summary
         assert "clipping" in result.losses
 
-    @patch("services.analysis.clipping.ReadingsRepository")
+    @patch("solar_platform.analysis.clipping.ReadingsRepository")
     def test_missing_columns(self, MockRepo):
         df = pd.DataFrame({"unrelated": [1, 2, 3]})
         mock_repo = MagicMock()
@@ -128,7 +128,7 @@ class TestClippingEngine:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestDegradationEngine:
-    @patch("services.analysis.degradation.ReadingsRepository")
+    @patch("solar_platform.analysis.degradation.ReadingsRepository")
     def test_no_readings(self, MockRepo):
         mock_repo = MagicMock()
         mock_repo.get_readings.return_value = pd.DataFrame()
@@ -141,7 +141,7 @@ class TestDegradationEngine:
         assert result.analysis_type == "degradation"
         assert "No readings" in result.warnings[0]
 
-    @patch("services.analysis.degradation.ReadingsRepository")
+    @patch("solar_platform.analysis.degradation.ReadingsRepository")
     def test_with_enough_data(self, MockRepo):
         # Generate 6 months of daily data with slight PR decline
         dates = pd.date_range("2024-07-01", periods=180, freq="D")
@@ -169,7 +169,7 @@ class TestDegradationEngine:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestShadingEngine:
-    @patch("services.analysis.shading.ReadingsRepository")
+    @patch("solar_platform.analysis.shading.ReadingsRepository")
     def test_no_readings(self, MockRepo):
         mock_repo = MagicMock()
         mock_repo.get_readings.return_value = pd.DataFrame()
@@ -182,7 +182,7 @@ class TestShadingEngine:
         assert result.analysis_type == "shading"
         assert len(result.warnings) > 0
 
-    @patch("services.analysis.shading.ReadingsRepository")
+    @patch("solar_platform.analysis.shading.ReadingsRepository")
     def test_with_data(self, MockRepo):
         times = pd.date_range("2025-01-01", periods=500, freq="15min")
         power = np.abs(np.sin(np.linspace(0, 20 * np.pi, 500))) * 100
@@ -209,7 +209,7 @@ class TestShadingEngine:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestThermalLossEngine:
-    @patch("services.analysis.thermal.ReadingsRepository")
+    @patch("solar_platform.analysis.thermal.ReadingsRepository")
     def test_no_readings(self, MockRepo):
         mock_repo = MagicMock()
         mock_repo.get_readings.return_value = pd.DataFrame()
@@ -222,7 +222,7 @@ class TestThermalLossEngine:
         assert result.analysis_type == "thermal"
         assert len(result.warnings) > 0
 
-    @patch("services.analysis.thermal.ReadingsRepository")
+    @patch("solar_platform.analysis.thermal.ReadingsRepository")
     def test_with_data(self, MockRepo):
         times = pd.date_range("2025-01-01", periods=100, freq="15min")
         module = np.random.uniform(30, 55, 100)
@@ -250,7 +250,7 @@ class TestThermalLossEngine:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestCurtailmentEngine:
-    @patch("services.analysis.curtailment.ReadingsRepository")
+    @patch("solar_platform.analysis.curtailment.ReadingsRepository")
     def test_no_readings(self, MockRepo):
         mock_repo = MagicMock()
         mock_repo.get_readings.return_value = pd.DataFrame()
@@ -263,7 +263,7 @@ class TestCurtailmentEngine:
         assert result.analysis_type == "curtailment"
         assert len(result.warnings) > 0
 
-    @patch("services.analysis.curtailment.ReadingsRepository")
+    @patch("solar_platform.analysis.curtailment.ReadingsRepository")
     def test_with_export_limit(self, MockRepo):
         times = pd.date_range("2025-01-01", periods=100, freq="15min")
         limits = [100.0] * 80 + [50.0] * 20  # 20% curtailed
@@ -288,7 +288,7 @@ class TestCurtailmentEngine:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestFoulingEngine:
-    @patch("services.analysis.fouling.ReadingsRepository")
+    @patch("solar_platform.analysis.fouling.ReadingsRepository")
     def test_no_readings(self, MockRepo):
         mock_repo = MagicMock()
         mock_repo.get_readings.return_value = pd.DataFrame()
@@ -301,7 +301,7 @@ class TestFoulingEngine:
         assert result.analysis_type == "fouling"
         assert len(result.warnings) > 0
 
-    @patch("services.analysis.fouling.ReadingsRepository")
+    @patch("solar_platform.analysis.fouling.ReadingsRepository")
     def test_with_data(self, MockRepo):
         # 60 days of data with declining performance
         times = pd.date_range("2025-01-01", periods=60 * 96, freq="15min")
@@ -332,11 +332,11 @@ class TestFoulingEngine:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestLossWaterfallEngine:
-    @patch("services.analysis.waterfall.ThermalLossEngine")
-    @patch("services.analysis.waterfall.FoulingEngine")
-    @patch("services.analysis.waterfall.ShadingEngine")
-    @patch("services.analysis.waterfall.CurtailmentEngine")
-    @patch("services.analysis.waterfall.ClippingEngine")
+    @patch("solar_platform.analysis.waterfall.ThermalLossEngine")
+    @patch("solar_platform.analysis.waterfall.FoulingEngine")
+    @patch("solar_platform.analysis.waterfall.ShadingEngine")
+    @patch("solar_platform.analysis.waterfall.CurtailmentEngine")
+    @patch("solar_platform.analysis.waterfall.ClippingEngine")
     def test_aggregates_losses(self, MockClip, MockCurt, MockShad, MockFoul, MockTherm):
         from solar_platform.analysis.base import AnalysisResult
 
@@ -367,11 +367,11 @@ class TestLossWaterfallEngine:
         assert result.losses["thermal"] == 4.0
         assert not result.table.empty
 
-    @patch("services.analysis.waterfall.ThermalLossEngine")
-    @patch("services.analysis.waterfall.FoulingEngine")
-    @patch("services.analysis.waterfall.ShadingEngine")
-    @patch("services.analysis.waterfall.CurtailmentEngine")
-    @patch("services.analysis.waterfall.ClippingEngine")
+    @patch("solar_platform.analysis.waterfall.ThermalLossEngine")
+    @patch("solar_platform.analysis.waterfall.FoulingEngine")
+    @patch("solar_platform.analysis.waterfall.ShadingEngine")
+    @patch("solar_platform.analysis.waterfall.CurtailmentEngine")
+    @patch("solar_platform.analysis.waterfall.ClippingEngine")
     def test_collects_warnings(self, MockClip, MockCurt, MockShad, MockFoul, MockTherm):
         from solar_platform.analysis.base import AnalysisResult
         start = datetime(2025, 1, 1)
@@ -404,7 +404,7 @@ class TestLossWaterfallEngine:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestPRTrendingEngine:
-    @patch("services.analysis.pr_trending.ReadingsRepository")
+    @patch("solar_platform.analysis.pr_trending.ReadingsRepository")
     def test_no_readings(self, MockRepo):
         mock_repo = MagicMock()
         mock_repo.get_readings.return_value = pd.DataFrame()
@@ -417,7 +417,7 @@ class TestPRTrendingEngine:
         assert result.analysis_type == "pr_trending"
         assert len(result.warnings) > 0
 
-    @patch("services.analysis.pr_trending.ReadingsRepository")
+    @patch("solar_platform.analysis.pr_trending.ReadingsRepository")
     def test_with_pr_data(self, MockRepo):
         times = pd.date_range("2025-01-01", periods=30 * 24, freq="h")
         pr = np.random.uniform(78, 88, 30 * 24)

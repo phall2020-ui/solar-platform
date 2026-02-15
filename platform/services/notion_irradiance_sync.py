@@ -414,8 +414,6 @@ def _build_properties(row: dict[str, Any]) -> dict[str, Any]:
     lt_region = row.get("lt_region")
     if lt_region:
         props["LT Region"] = {"rich_text": [{"text": {"content": str(lt_region)}}]}
-    else:
-        props["LT Region"] = {"rich_text": []}
 
     # Number fields
     number_map = {
@@ -437,11 +435,21 @@ def _build_properties(row: dict[str, Any]) -> dict[str, Any]:
         "Availability (%)":             "availability",
     }
 
+    lt_optional_cols = {
+        "LT GHI (kWh/m²)",
+        "LT Annual GHI (kWh/m²)",
+        "SolarGIS GHI vs LT (%)",
+    }
+
     for notion_col, data_key in number_map.items():
         val = row.get(data_key)
         if val is not None and val == val:  # skip NaN
             props[notion_col] = {"number": round(float(val), 4)}
         else:
+            # For LT fields, avoid clearing values if we couldn't infer them.
+            # This lets manual Notion overrides survive future sync runs.
+            if notion_col in lt_optional_cols:
+                continue
             props[notion_col] = {"number": None}
 
     return props

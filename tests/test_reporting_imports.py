@@ -40,7 +40,7 @@ def test_reporting_scheduler_import():
 
 
 def test_reporting_init_reexports():
-    from services.reporting import ReportType, SectionType, ALL_TEMPLATES, get_template
+    from solar_platform.reporting import ReportType, SectionType, ALL_TEMPLATES, get_template
     assert ReportType is not None
     assert callable(get_template)
 

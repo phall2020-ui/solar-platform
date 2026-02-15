@@ -126,7 +126,7 @@ class TestAppErrorHandler:
         handler = AppErrorHandler()
         assert handler.db_path is None
 
-    @patch("services.error_handler.get_connection")
+    @patch("solar_platform.services.error_handler.get_connection")
     def test_init_with_db_path(self, mock_conn):
         mock_conn.return_value.__enter__ = MagicMock()
         mock_conn.return_value.__exit__ = MagicMock(return_value=False)
@@ -160,17 +160,17 @@ class TestGetErrorHandler:
     """Tests for the get_error_handler() factory."""
 
     def test_returns_app_error_handler(self):
-        import services.error_handler as mod
+        import solar_platform.services.error_handler as mod
         mod._global_handler = None  # reset singleton
-        with patch("services.error_handler.get_connection"), \
+        with patch("solar_platform.services.error_handler.get_connection"), \
              patch.dict(sys.modules, {"streamlit": _st_mock}):
             handler = get_error_handler()
             assert isinstance(handler, AppErrorHandler)
 
     def test_returns_same_instance_on_second_call(self):
-        import services.error_handler as mod
+        import solar_platform.services.error_handler as mod
         mod._global_handler = None
-        with patch("services.error_handler.get_connection"), \
+        with patch("solar_platform.services.error_handler.get_connection"), \
              patch.dict(sys.modules, {"streamlit": _st_mock}):
             h1 = get_error_handler()
             h2 = get_error_handler()

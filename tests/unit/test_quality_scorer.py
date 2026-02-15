@@ -7,8 +7,8 @@ import pandas as pd
 
 @pytest.mark.unit
 class TestQualityScorer:
-    @patch("services.data_quality.quality_scorer.run_validation")
-    @patch("services.data_quality.quality_scorer.SOURCE_PRIORITY", {"scada": 10, "manual": 4, "unknown": 1})
+    @patch("solar_platform.data_quality.quality_scorer.run_validation")
+    @patch("solar_platform.data_quality.quality_scorer.SOURCE_PRIORITY", {"scada": 10, "manual": 4, "unknown": 1})
     def test_score_reading_perfect(self, mock_run_validation):
         """A perfect reading (all fields present, no errors, SCADA source) scores high."""
         from solar_platform.data_quality.validators import ValidationReport
@@ -29,8 +29,8 @@ class TestQualityScorer:
         score = scorer.score_reading(reading, {"capacity_kw": 5000})
         assert score >= 90.0
 
-    @patch("services.data_quality.quality_scorer.run_validation")
-    @patch("services.data_quality.quality_scorer.SOURCE_PRIORITY", {"scada": 10, "manual": 4, "unknown": 1})
+    @patch("solar_platform.data_quality.quality_scorer.run_validation")
+    @patch("solar_platform.data_quality.quality_scorer.SOURCE_PRIORITY", {"scada": 10, "manual": 4, "unknown": 1})
     def test_score_reading_missing_fields(self, mock_run_validation):
         """Missing key fields reduce completeness sub-score."""
         from solar_platform.data_quality.validators import ValidationReport
@@ -44,8 +44,8 @@ class TestQualityScorer:
         score = scorer.score_reading(reading, {})
         assert score < 100.0
 
-    @patch("services.data_quality.quality_scorer.run_validation")
-    @patch("services.data_quality.quality_scorer.SOURCE_PRIORITY", {"scada": 10, "estimated": 2, "unknown": 1})
+    @patch("solar_platform.data_quality.quality_scorer.run_validation")
+    @patch("solar_platform.data_quality.quality_scorer.SOURCE_PRIORITY", {"scada": 10, "estimated": 2, "unknown": 1})
     def test_score_reading_low_source_priority(self, mock_run_validation):
         """Low-priority source reduces source sub-score."""
         from solar_platform.data_quality.validators import ValidationReport
@@ -69,8 +69,8 @@ class TestQualityScorer:
 
         assert score_high > score_low
 
-    @patch("services.data_quality.quality_scorer.run_validation")
-    @patch("services.data_quality.quality_scorer.SOURCE_PRIORITY", {"scada": 10})
+    @patch("solar_platform.data_quality.quality_scorer.run_validation")
+    @patch("solar_platform.data_quality.quality_scorer.SOURCE_PRIORITY", {"scada": 10})
     def test_score_reading_clamped_to_0_100(self, mock_run_validation):
         from solar_platform.data_quality.validators import ValidationReport
         mock_report = ValidationReport()
@@ -83,8 +83,8 @@ class TestQualityScorer:
         score = scorer.score_reading(reading, {})
         assert 0.0 <= score <= 100.0
 
-    @patch("services.data_quality.quality_scorer.run_validation")
-    @patch("services.data_quality.quality_scorer.SOURCE_PRIORITY", {"scada": 10})
+    @patch("solar_platform.data_quality.quality_scorer.run_validation")
+    @patch("solar_platform.data_quality.quality_scorer.SOURCE_PRIORITY", {"scada": 10})
     def test_score_batch(self, mock_run_validation):
         from solar_platform.data_quality.validators import ValidationReport
         mock_report = ValidationReport()

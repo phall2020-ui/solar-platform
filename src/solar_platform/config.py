@@ -231,3 +231,7 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return a cached validated settings object."""
     return Settings()
+
+
+# Convenience alias — many call sites do `from solar_platform.config import config`
+config = get_settings()

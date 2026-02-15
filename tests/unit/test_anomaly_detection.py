@@ -10,22 +10,22 @@ import pandas as pd
 @pytest.mark.unit
 class TestAnomalyType:
     def test_statistical(self):
-        from services.analytics.anomaly_detection import AnomalyType
+        from solar_platform.analytics.anomaly_detection import AnomalyType
         assert AnomalyType.STATISTICAL == "statistical"
 
     def test_contextual(self):
-        from services.analytics.anomaly_detection import AnomalyType
+        from solar_platform.analytics.anomaly_detection import AnomalyType
         assert AnomalyType.CONTEXTUAL == "contextual"
 
     def test_isolation_forest(self):
-        from services.analytics.anomaly_detection import AnomalyType
+        from solar_platform.analytics.anomaly_detection import AnomalyType
         assert AnomalyType.ISOLATION_FOREST == "isolation_forest"
 
 
 @pytest.mark.unit
 class TestAnomaly:
     def test_defaults(self):
-        from services.analytics.anomaly_detection import Anomaly, AnomalyType
+        from solar_platform.analytics.anomaly_detection import Anomaly, AnomalyType
         a = Anomaly(plant_uid="p1", metric="pr", value=0.5)
         assert a.plant_uid == "p1"
         assert a.anomaly_type == AnomalyType.STATISTICAL
@@ -34,7 +34,7 @@ class TestAnomaly:
         assert a.metadata == {}
 
     def test_custom_fields(self):
-        from services.analytics.anomaly_detection import Anomaly, AnomalyType
+        from solar_platform.analytics.anomaly_detection import Anomaly, AnomalyType
         a = Anomaly(
             plant_uid="p1",
             anomaly_type=AnomalyType.CONTEXTUAL,
@@ -52,26 +52,26 @@ class TestAnomaly:
 @pytest.mark.unit
 class TestStatisticalDetector:
     def test_detector_name(self):
-        from services.analytics.anomaly_detection import StatisticalDetector
+        from solar_platform.analytics.anomaly_detection import StatisticalDetector
         d = StatisticalDetector()
         assert d.detector_name == "statistical_z_score"
 
     def test_no_relevant_columns(self):
-        from services.analytics.anomaly_detection import StatisticalDetector
+        from solar_platform.analytics.anomaly_detection import StatisticalDetector
         d = StatisticalDetector()
         df = pd.DataFrame({"unrelated": [1, 2, 3]})
         results = d.detect(df, "p1")
         assert results == []
 
     def test_insufficient_data(self):
-        from services.analytics.anomaly_detection import StatisticalDetector
+        from solar_platform.analytics.anomaly_detection import StatisticalDetector
         d = StatisticalDetector()
         df = pd.DataFrame({"pr": [0.8, 0.85, 0.9]})
         results = d.detect(df, "p1")
         assert results == []
 
     def test_detects_outlier(self):
-        from services.analytics.anomaly_detection import StatisticalDetector
+        from solar_platform.analytics.anomaly_detection import StatisticalDetector
         d = StatisticalDetector(z_threshold=2.0)
         # 99 normal + 1 extreme outlier
         values = [80.0] * 50 + [82.0] * 49 + [200.0]
@@ -84,7 +84,7 @@ class TestStatisticalDetector:
         assert results[0].metric == "pr"
 
     def test_no_outlier_in_uniform_data(self):
-        from services.analytics.anomaly_detection import StatisticalDetector
+        from solar_platform.analytics.anomaly_detection import StatisticalDetector
         d = StatisticalDetector(z_threshold=3.0)
         np.random.seed(42)
         values = np.random.normal(80, 2, 100).tolist()
@@ -98,7 +98,7 @@ class TestStatisticalDetector:
         assert isinstance(results, list)
 
     def test_zero_std_skipped(self):
-        from services.analytics.anomaly_detection import StatisticalDetector
+        from solar_platform.analytics.anomaly_detection import StatisticalDetector
         d = StatisticalDetector()
         # All identical values → std=0 → should skip
         df = pd.DataFrame({
@@ -112,19 +112,19 @@ class TestStatisticalDetector:
 @pytest.mark.unit
 class TestContextualDetector:
     def test_detector_name(self):
-        from services.analytics.anomaly_detection import ContextualDetector
+        from solar_platform.analytics.anomaly_detection import ContextualDetector
         d = ContextualDetector()
         assert d.detector_name == "contextual_gen_irradiance"
 
     def test_missing_columns(self):
-        from services.analytics.anomaly_detection import ContextualDetector
+        from solar_platform.analytics.anomaly_detection import ContextualDetector
         d = ContextualDetector()
         df = pd.DataFrame({"pr": [0.8]})
         results = d.detect(df, "p1")
         assert results == []
 
     def test_insufficient_data(self):
-        from services.analytics.anomaly_detection import ContextualDetector
+        from solar_platform.analytics.anomaly_detection import ContextualDetector
         d = ContextualDetector()
         df = pd.DataFrame({
             "generation_kwh": [100, 200],
@@ -134,7 +134,7 @@ class TestContextualDetector:
         assert results == []
 
     def test_detects_contextual_anomaly(self):
-        from services.analytics.anomaly_detection import ContextualDetector
+        from solar_platform.analytics.anomaly_detection import ContextualDetector
         d = ContextualDetector(residual_threshold=2.0)
         np.random.seed(42)
         irr = np.linspace(100, 1000, 50)
@@ -153,19 +153,19 @@ class TestContextualDetector:
 @pytest.mark.unit
 class TestIsolationForestDetector:
     def test_detector_name(self):
-        from services.analytics.anomaly_detection import IsolationForestDetector
+        from solar_platform.analytics.anomaly_detection import IsolationForestDetector
         d = IsolationForestDetector()
         assert d.detector_name == "isolation_forest"
 
     def test_insufficient_columns(self):
-        from services.analytics.anomaly_detection import IsolationForestDetector
+        from solar_platform.analytics.anomaly_detection import IsolationForestDetector
         d = IsolationForestDetector()
         df = pd.DataFrame({"pr": [0.8] * 30})
         results = d.detect(df, "p1")
         assert results == []
 
     def test_insufficient_rows(self):
-        from services.analytics.anomaly_detection import IsolationForestDetector
+        from solar_platform.analytics.anomaly_detection import IsolationForestDetector
         d = IsolationForestDetector()
         df = pd.DataFrame({
             "pr": [0.8] * 5,
@@ -178,7 +178,7 @@ class TestIsolationForestDetector:
 @pytest.mark.unit
 class TestAnomalyService:
     def test_runs_all_detectors(self):
-        from services.analytics.anomaly_detection import AnomalyService, AnomalyDetector, Anomaly
+        from solar_platform.analytics.anomaly_detection import AnomalyService, AnomalyDetector, Anomaly
         
         class FakeDetector(AnomalyDetector):
             @property
@@ -194,7 +194,7 @@ class TestAnomalyService:
         assert len(results) >= 1
 
     def test_handles_detector_failure(self):
-        from services.analytics.anomaly_detection import AnomalyService, AnomalyDetector
+        from solar_platform.analytics.anomaly_detection import AnomalyService, AnomalyDetector
 
         class BrokenDetector(AnomalyDetector):
             @property
@@ -209,7 +209,7 @@ class TestAnomalyService:
         assert results == []
 
     def test_deduplication(self):
-        from services.analytics.anomaly_detection import AnomalyService, Anomaly
+        from solar_platform.analytics.anomaly_detection import AnomalyService, Anomaly
         ts = datetime(2025, 1, 1, tzinfo=timezone.utc)
         anomalies = [
             Anomaly(plant_uid="p1", timestamp=ts, metric="pr", value=0.5),

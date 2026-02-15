@@ -51,7 +51,7 @@ class TestBudgetComparison:
 
 @pytest.mark.unit
 class TestBudgetService:
-    @patch("services.financial.budget.get_engine")
+    @patch("solar_platform.financial.budget.get_engine")
     def test_compare_with_budget(self, mock_get_engine):
         # Arrange
         mock_engine = MagicMock()
@@ -82,7 +82,7 @@ class TestBudgetService:
         assert result.variance_kwh == -100.0
         assert result.variance_pct == pytest.approx(-10.0)
 
-    @patch("services.financial.budget.get_engine")
+    @patch("solar_platform.financial.budget.get_engine")
     def test_compare_zero_budget(self, mock_get_engine):
         mock_engine = MagicMock()
         mock_engine.table_exists.return_value = True
@@ -103,7 +103,7 @@ class TestBudgetService:
         # variance_pct should be 0 when budget is 0 (division guard)
         assert result.variance_pct == 0.0
 
-    @patch("services.financial.budget.get_engine")
+    @patch("solar_platform.financial.budget.get_engine")
     def test_compare_no_readings_table(self, mock_get_engine):
         mock_engine = MagicMock()
         mock_engine.table_exists.side_effect = lambda table: table == "plant_budgets"
@@ -116,7 +116,7 @@ class TestBudgetService:
         result = svc.compare("p1", 2025, 1)
         assert result.actual_kwh == 0.0
 
-    @patch("services.financial.budget.get_engine")
+    @patch("solar_platform.financial.budget.get_engine")
     def test_set_budget(self, mock_get_engine):
         mock_engine = MagicMock()
         mock_engine.table_exists.return_value = True

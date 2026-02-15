@@ -57,34 +57,34 @@ _STREAMLIT_MODULES = {
 
 # Service modules that should be safely importable without Streamlit
 _SERVICE_MODULES = [
-    "services.database.engine",
-    "services.database.repository",
-    "services.alerts.models",
-    "services.alerts.repository",
-    "services.alerts.ticketing",
-    "services.alerts.default_rules",
-    "services.alerts.notifications",
-    "services.analysis.base",
-    "services.analysis.clipping",
-    "services.analysis.curtailment",
-    "services.analysis.degradation",
-    "services.analysis.fouling",
-    "services.analysis.shading",
-    "services.analysis.thermal",
-    "services.analysis.waterfall",
-    "services.analysis.pr_trending",
-    "services.analysis.comparative",
-    "services.data_quality.validators",
-    "services.data_quality.quality_scorer",
-    "services.data_quality.gap_detection",
-    "services.data_quality.gap_filling",
-    "services.data_quality.harmonization",
-    "services.data_quality.sensor_health",
-    "services.data_quality.source_priority",
-    "services.ingestion.base",
-    "services.ingestion.coordinator",
-    "services.reporting.models",
-    "services.reporting.templates",
+    "solar_platform.db.engine",
+    "solar_platform.db.repository",
+    "solar_platform.alerts.models",
+    "solar_platform.alerts.repository",
+    "solar_platform.alerts.ticketing",
+    "solar_platform.alerts.default_rules",
+    "solar_platform.alerts.notifications",
+    "solar_platform.analysis.base",
+    "solar_platform.analysis.clipping",
+    "solar_platform.analysis.curtailment",
+    "solar_platform.analysis.degradation",
+    "solar_platform.analysis.fouling",
+    "solar_platform.analysis.shading",
+    "solar_platform.analysis.thermal",
+    "solar_platform.analysis.waterfall",
+    "solar_platform.analysis.pr_trending",
+    "solar_platform.analysis.comparative",
+    "solar_platform.data_quality.validators",
+    "solar_platform.data_quality.quality_scorer",
+    "solar_platform.data_quality.gap_detection",
+    "solar_platform.data_quality.gap_filling",
+    "solar_platform.data_quality.harmonization",
+    "solar_platform.data_quality.sensor_health",
+    "solar_platform.data_quality.source_priority",
+    "solar_platform.ingestion.base",
+    "solar_platform.ingestion.coordinator",
+    "solar_platform.reporting.models",
+    "solar_platform.reporting.templates",
 ]
 
 
@@ -145,7 +145,7 @@ class TestKeyExports:
         assert AnalysisResult is not None
 
     def test_data_quality_exports(self):
-        from services.data_quality import (
+        from solar_platform.data_quality import (
             DEFAULT_VALIDATORS,
             GapDetector,
             QualityScorer,
@@ -157,7 +157,7 @@ class TestKeyExports:
         assert len(DEFAULT_VALIDATORS) >= 5
 
     def test_ingestion_exports(self):
-        from services.ingestion import (
+        from solar_platform.ingestion import (
             DataSourceAdapter,
             IngestionCoordinator,
             Reading,

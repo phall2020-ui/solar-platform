@@ -9,7 +9,7 @@ import pandas as pd
 
 @pytest.mark.unit
 class TestTariffManager:
-    @patch("services.financial.tariff.get_engine")
+    @patch("solar_platform.financial.tariff.get_engine")
     def test_get_tariff_found(self, mock_get_engine):
         mock_engine = MagicMock()
         mock_engine.table_exists.return_value = True
@@ -29,7 +29,7 @@ class TestTariffManager:
         assert result["currency"] == "EUR"
         assert result["escalation_pct"] == 2.0
 
-    @patch("services.financial.tariff.get_engine")
+    @patch("solar_platform.financial.tariff.get_engine")
     def test_get_tariff_not_found(self, mock_get_engine):
         mock_engine = MagicMock()
         mock_engine.table_exists.return_value = True
@@ -42,7 +42,7 @@ class TestTariffManager:
 
         assert result is None
 
-    @patch("services.financial.tariff.get_engine")
+    @patch("solar_platform.financial.tariff.get_engine")
     def test_set_tariff(self, mock_get_engine):
         mock_engine = MagicMock()
         mock_engine.table_exists.return_value = True
@@ -58,7 +58,7 @@ class TestTariffManager:
         assert call_data["tariff_type"] == "ppa"
         assert call_data["escalation_pct"] == 3.0
 
-    @patch("services.financial.tariff.get_engine")
+    @patch("solar_platform.financial.tariff.get_engine")
     def test_set_tariff_with_end_date(self, mock_get_engine):
         mock_engine = MagicMock()
         mock_engine.table_exists.return_value = True
@@ -71,7 +71,7 @@ class TestTariffManager:
         call_data = mock_engine.execute_upsert.call_args[0][1]
         assert call_data["end_date"] == date(2025, 12, 31)
 
-    @patch("services.financial.tariff.get_engine")
+    @patch("solar_platform.financial.tariff.get_engine")
     def test_import_from_csv_file_not_found(self, mock_get_engine):
         mock_engine = MagicMock()
         mock_engine.table_exists.return_value = True
@@ -83,7 +83,7 @@ class TestTariffManager:
         with pytest.raises(FileNotFoundError):
             mgr.import_from_csv("/nonexistent/file.csv")
 
-    @patch("services.financial.tariff.get_engine")
+    @patch("solar_platform.financial.tariff.get_engine")
     def test_import_from_csv_missing_columns(self, mock_get_engine, tmp_path):
         mock_engine = MagicMock()
         mock_engine.table_exists.return_value = True
@@ -99,7 +99,7 @@ class TestTariffManager:
         with pytest.raises(ValueError, match="missing required columns"):
             mgr.import_from_csv(csv_path)
 
-    @patch("services.financial.tariff.get_engine")
+    @patch("solar_platform.financial.tariff.get_engine")
     def test_import_from_csv_success(self, mock_get_engine, tmp_path):
         mock_engine = MagicMock()
         mock_engine.table_exists.return_value = True
@@ -119,7 +119,7 @@ class TestTariffManager:
         assert count == 2
         assert mock_engine.execute_upsert.call_count == 2
 
-    @patch("services.financial.tariff.get_engine")
+    @patch("solar_platform.financial.tariff.get_engine")
     def test_ensure_table_created(self, mock_get_engine):
         mock_engine = MagicMock()
         mock_engine.table_exists.return_value = False

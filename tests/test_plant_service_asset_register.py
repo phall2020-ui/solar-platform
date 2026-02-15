@@ -8,7 +8,7 @@ import pytest
 
 def test_get_plant_includes_asset_register(monkeypatch: pytest.MonkeyPatch) -> None:
     """Plant detail should expose Notion asset metadata when available."""
-    from services import plant_service as plant_service_module
+    from solar_platform.services import plant as plant_service_module
 
     class FakePlantRepository:
         def get_by_uid(self, plant_uid: str):
@@ -51,7 +51,7 @@ def test_get_plant_includes_asset_register(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_get_all_plants_includes_asset_register(monkeypatch: pytest.MonkeyPatch) -> None:
     """Plant list should include matched asset-register rows."""
-    from services import plant_service as plant_service_module
+    from solar_platform.services import plant as plant_service_module
 
     class FakePlantRepository:
         def get_by_uid(self, plant_uid: str):  # noqa: ARG002

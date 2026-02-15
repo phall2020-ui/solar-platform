@@ -39,7 +39,7 @@ from solar_platform.reporting.models import (
     ReportTemplate,
     SectionType,
 )
-from solar_platform.styles.design_tokens import AMPYR_TEAL, AMPYR_TEAL_LIGHT, STATUS_COLORS
+from solar_platform.constants import AMPYR_TEAL, AMPYR_TEAL_LIGHT, STATUS_COLORS
 
 logger = get_logger("reporting.pdf")
 

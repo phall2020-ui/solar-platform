@@ -11,7 +11,7 @@ class AlertNotificationBridge:
     def __init__(self) -> None:
         self._service = None
         try:
-            from services.notification_service import NotificationService, NotificationType
+            from solar_platform.services.notifications import NotificationService, NotificationType
 
             self._service = NotificationService()
             self._notification_type = NotificationType.ALERT

@@ -48,7 +48,7 @@ class TestRevenueResult:
 
 @pytest.mark.unit
 class TestRevenueService:
-    @patch("services.financial.revenue.get_engine")
+    @patch("solar_platform.financial.revenue.get_engine")
     def test_calculate_monthly_basic(self, mock_get_engine):
         # Arrange
         mock_engine = MagicMock()
@@ -73,7 +73,7 @@ class TestRevenueService:
         assert result.generation_mwh == 500.0  # 500000/1000
         assert result.revenue == 25000.0  # 500 * 50
 
-    @patch("services.financial.revenue.get_engine")
+    @patch("solar_platform.financial.revenue.get_engine")
     def test_calculate_monthly_zero_generation(self, mock_get_engine):
         mock_engine = MagicMock()
         mock_engine.table_exists.return_value = True
@@ -91,7 +91,7 @@ class TestRevenueService:
         assert result.revenue == 0.0
         assert result.generation_mwh == 0.0
 
-    @patch("services.financial.revenue.get_engine")
+    @patch("solar_platform.financial.revenue.get_engine")
     def test_calculate_monthly_no_readings_table(self, mock_get_engine):
         mock_engine = MagicMock()
         mock_engine.table_exists.return_value = False
@@ -108,7 +108,7 @@ class TestRevenueService:
         result = svc.calculate_monthly("p1", 2025, 1, tariff_per_mwh=50.0)
         assert result.generation_mwh == 0.0
 
-    @patch("services.financial.revenue.get_engine")
+    @patch("solar_platform.financial.revenue.get_engine")
     def test_portfolio_summary_no_plants(self, mock_get_engine):
         mock_engine = MagicMock()
         mock_engine.table_exists.return_value = False
@@ -120,7 +120,7 @@ class TestRevenueService:
         results = svc.portfolio_summary(2025, 1)
         assert results == []
 
-    @patch("services.financial.revenue.get_engine")
+    @patch("solar_platform.financial.revenue.get_engine")
     def test_calculate_monthly_preserves_tariff_type(self, mock_get_engine):
         mock_engine = MagicMock()
         mock_engine.table_exists.return_value = True

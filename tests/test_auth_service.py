@@ -17,12 +17,11 @@ import pytest
 
 def _make_auth_service(tmp_path: Path):
     """Create an AuthService with DB init mocked out."""
-    with patch("services.auth_service.st"):  # prevent streamlit import side-effects
-        from solar_platform.services.auth import AuthService
+    from solar_platform.services.auth import AuthService
 
-        with patch.object(AuthService, "_init_database"), \
-             patch.object(AuthService, "_create_default_admin"):
-            svc = AuthService(db_path=tmp_path / "users.db")
+    with patch.object(AuthService, "_init_database"), \
+         patch.object(AuthService, "_create_default_admin"):
+        svc = AuthService(db_path=tmp_path / "users.db")
     return svc
 
 

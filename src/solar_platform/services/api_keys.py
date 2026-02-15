@@ -300,7 +300,7 @@ class APIService:
             return {'error': 'Insufficient permissions', 'status': 403}
 
         try:
-            from services.notification_service import NotificationService
+            from solar_platform.services.notifications import NotificationService
             notif_service = NotificationService()
 
             alerts = notif_service.get_alerts(active_only=active_only)
@@ -335,7 +335,7 @@ class APIService:
             return {'error': 'Insufficient permissions', 'status': 403}
 
         try:
-            from services.export_service import ExportFormat, ExportService
+            from solar_platform.services.export import ExportFormat, ExportService
 
             export_service = ExportService()
 

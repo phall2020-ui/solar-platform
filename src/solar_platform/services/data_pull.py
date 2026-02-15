@@ -17,7 +17,7 @@ Rate limiting:
   - Date-range chunking (≤90 days per request) to avoid 413 responses
 
 Usage:
-    from services.juggle_data_pull import JuggleDataPullService
+    from solar_platform.services.data_pull import JuggleDataPullService
 
     svc = JuggleDataPullService()
     # Discover & register plants (cross-referenced with Notion)
@@ -1034,7 +1034,7 @@ class JuggleDataPullService:
 
 def _create_service() -> JuggleDataPullService:
     """Create a JuggleDataPullService with background-job progress support."""
-    from services.background_jobs import get_job_manager
+    from solar_platform.services.background_jobs import get_job_manager
 
     svc = JuggleDataPullService()
     manager = get_job_manager()

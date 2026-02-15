@@ -64,7 +64,7 @@ def _ensure_reporting_modules():
 
 # Import cache layer
 try:
-    from services.cache_layer import get_cache_layer
+    from solar_platform.services.cache_layer import get_cache_layer
     CACHE_AVAILABLE = True
 except ImportError:
     CACHE_AVAILABLE = False
@@ -96,7 +96,7 @@ class ReportingBridge:
         cfg = _get_config()
         if cfg.use_cached_views:
             try:
-                from services.materialized_views import MaterializedViewsManager
+                from solar_platform.services.materialized_views import MaterializedViewsManager
                 self.views_manager = MaterializedViewsManager(self.db_path)
                 self.logger.info("materialized_views_enabled")
             except Exception as e:

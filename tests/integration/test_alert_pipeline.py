@@ -190,10 +190,10 @@ class TestAlertPipeline:
         )
 
         # Import AlertEngine with mocked analysis engines to avoid broken dependencies
-        with patch("services.alerts.engine.ClippingEngine"), \
-             patch("services.alerts.engine.CurtailmentEngine"), \
-             patch("services.alerts.engine.FoulingEngine"), \
-             patch("services.alerts.engine.ThermalLossEngine"):
+        with patch("solar_platform.alerts.engine.ClippingEngine"), \
+             patch("solar_platform.alerts.engine.CurtailmentEngine"), \
+             patch("solar_platform.alerts.engine.FoulingEngine"), \
+             patch("solar_platform.alerts.engine.ThermalLossEngine"):
             from solar_platform.alerts.engine import AlertEngine
             engine = AlertEngine(db_engine=alert_engine_db)
             triggered = engine.evaluate_plant("uid-empty")
@@ -230,7 +230,7 @@ class TestTicketService:
             description="",
         )
         # Open → In Progress
-        result = svc.transition(ticket.id, status=__import__("services.alerts.models", fromlist=["TicketStatus"]).TicketStatus.IN_PROGRESS)
+        result = svc.transition(ticket.id, status=__import__("solar_platform.alerts.models", fromlist=["TicketStatus"]).TicketStatus.IN_PROGRESS)
         assert result is not None
 
     def test_invalid_transition_raises(self, alert_engine_db):
