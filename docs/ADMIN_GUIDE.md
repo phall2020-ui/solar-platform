@@ -32,18 +32,18 @@ This guide is for system administrators responsible for deploying, configuring, 
 
 ```bash
 # Clone and enter the project
-cd "Unified app"
+cd solar-platform
 
 # Create virtual environment and install dependencies
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .[all]
 
 # Start the development server with hot-reload
-make dev
+streamlit run app/main.py --server.port=8501 --server.runOnSave=true
 ```
 
-This runs `streamlit run app.py --server.port=8501 --server.runOnSave=true`.
+This runs `streamlit run app/main.py --server.port=8501 --server.runOnSave=true`.
 
 ### Docker Compose (Production)
 
