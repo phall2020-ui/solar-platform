@@ -6,10 +6,10 @@ MODULE_DIR = Path(__file__).resolve().parents[1]
 if str(MODULE_DIR) not in sys.path:
     sys.path.insert(0, str(MODULE_DIR))
 
-_SPEC = importlib.util.spec_from_file_location("notion_sync", MODULE_DIR / "notion_sync.py")
-notion_sync = importlib.util.module_from_spec(_SPEC)
-assert _SPEC and _SPEC.loader
-_SPEC.loader.exec_module(notion_sync)
+NOTION_SYNC_SPEC = importlib.util.spec_from_file_location("notion_sync", MODULE_DIR / "notion_sync.py")
+notion_sync = importlib.util.module_from_spec(NOTION_SYNC_SPEC)
+assert NOTION_SYNC_SPEC and NOTION_SYNC_SPEC.loader
+NOTION_SYNC_SPEC.loader.exec_module(notion_sync)
 
 
 def test_parse_args_email_dry_run_implies_send(monkeypatch):
