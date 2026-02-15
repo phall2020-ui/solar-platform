@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import streamlit as st
 
-from services import legacy_toolkit
+from solar_platform.services import legacy_toolkit
 from styles import render_alert, render_divider, render_section_header
 
 logger = logging.getLogger(__name__)

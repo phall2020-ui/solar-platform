@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from components import drag_drop_uploader
-from services import legacy_toolkit
+from solar_platform.services import legacy_toolkit
 
 
 def render():

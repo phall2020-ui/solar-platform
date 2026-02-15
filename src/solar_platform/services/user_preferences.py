@@ -274,6 +274,15 @@ def init_preferences(db_path: str, user_id: str = "default") -> UserPreferences:
     return _preferences_instance
 
 
+def init_preferences_in_session(db_path: str, user_id: str = "default") -> UserPreferences:
+    """Back-compat alias used by the Streamlit app bootstrap.
+
+    This function intentionally does not depend on Streamlit. The preferences
+    service persists to DuckDB, so a simple singleton init is sufficient.
+    """
+    return init_preferences(db_path, user_id=user_id)
+
+
 def get_preferences() -> UserPreferences:
     """Get the global preferences instance."""
     global _preferences_instance

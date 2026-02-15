@@ -1,0 +1,25 @@
+{
+  "generated_at_utc": "2026-02-15T17:41:46.410432+00:00",
+  "run_mode": "current_mtd",
+  "period_start": "2026-02-01",
+  "period_end": "2026-02-14",
+  "summary": {
+    "mode": "current_mtd",
+    "range_start": "2026-02-01",
+    "range_end": "2026-02-14",
+    "synced_sites": 0,
+    "synced_rows": 0,
+    "unchanged_rows": 0,
+    "skipped_no_juggle_mapping": 0,
+    "skipped_inverter_only": 0,
+    "skipped_no_comparison_data": 0,
+    "site_errors": 0
+  },
+  "details": {
+    "skipped_no_juggle_mapping": [],
+    "skipped_inverter_only": [],
+    "skipped_no_comparison_data": [],
+    "site_errors": [],
+    "site_totals": {}
+  }
+}

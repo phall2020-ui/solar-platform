@@ -1,0 +1,7 @@
+Starting script...
+Token length: 50
+Requesting https://api.notion.com/v1/search...
+Status: 200
+Response: {"object":"list","results":[{"object":"database","id":"3081773a-96c0-8122-9625-fa9005d17426","cover":null,"icon":null,"created_time":"2026-02-15T17:44:00.000Z","created_by":{"object":"user","id":"a4563395-a72c-421e-a66f-f025c72a7f15"},"last_edited_by":{"object":"user","id":"a4563395-a72c-421e-a66f-f025c72a7f15"},"last_edited_time":"2026-02-15T17:44:00.000Z","title":[{"type":"text","text":{"content":"Meter / inverter comparison","link":null},"annotations":{"bold":false,"italic":false,"strikethrou
+Results count: 1
+DB: Meter / inverter comparison => 3081773a-96c0-8122-9625-fa9005d17426

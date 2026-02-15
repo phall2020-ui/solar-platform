@@ -12,8 +12,8 @@ def render_system_health_widget():
     Shows query performance, cache effectiveness, errors, and view refresh status.
     Designed to be embedded in the dashboard page.
     """
-    from services.materialized_views import MaterializedViewsManager, views_manager
-    from services.observability import metrics
+    from solar_platform.services.materialized_views import MaterializedViewsManager, views_manager
+    from solar_platform.services.observability import metrics
     from app.config_compat import config
     
     stats = metrics.get_stats()

@@ -14,7 +14,9 @@ from components import (
     job_status_viewer,
     submit_background_job_button,
 )
-from services import IncrementalETL, get_cache_layer, reporting_bridge as reporting
+from solar_platform.services.cache_layer import get_cache_layer
+from solar_platform.services.incremental_etl import IncrementalETL
+from solar_platform.services.reporting_bridge import reporting
 from app.config_compat import config
 
 
