@@ -4,8 +4,6 @@ on:
   schedule:
     - cron: '*/5 * * * *'
   repository_dispatch:
-    types:
-      - site_onboarding_submitted
   workflow_dispatch:
     inputs:
       dry_run:
