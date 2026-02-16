@@ -67,7 +67,7 @@ def detect_time_column(df: pd.DataFrame) -> str | None:
 
 def coerce_datetime(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
     out = df.copy()
-    out[time_col] = pd.to_datetime(out[time_col], errors="coerce", utc=True)
+    out[time_col] = pd.to_datetime(out[time_col], errors="coerce", utc=True, format="ISO8601")
     return out.dropna(subset=[time_col]).sort_values(time_col)
 
 
