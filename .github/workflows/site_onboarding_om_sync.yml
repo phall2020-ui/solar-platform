@@ -24,9 +24,10 @@ jobs:
     timeout-minutes: 30
     env:
       # Source: https://www.notion.so/91e9d443817d4a7982335d179b222645
-      ONBOARDING_DB_ID: f8cb88da-6105-4d0b-91e4-82254fc08898
-      OM_CONTRACTS_DB_ID: cf7d120d-1fb6-4cda-a21a-5f6d5ffccf47
-      OM_BILLING_DB_ID: 1603fd36-1a47-4387-9189-67348febe134
+      # Use Notion database IDs (page IDs) for /v1/databases endpoints.
+      ONBOARDING_DB_ID: bd47f0ec-8aa7-4f45-9908-accdf882e4eb
+      OM_CONTRACTS_DB_ID: 7dc7ccc4-5c5a-43d7-a75b-2e97818089dc
+      OM_BILLING_DB_ID: 39212e37-c38b-4c79-b1cd-8e54c976f7ea
 
     steps:
       - name: Checkout code

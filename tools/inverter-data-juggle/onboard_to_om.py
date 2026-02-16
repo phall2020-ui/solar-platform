@@ -15,9 +15,10 @@ import requests
 NOTION_API_BASE = "https://api.notion.com/v1"
 NOTION_VERSION = "2022-06-28"
 
-DEFAULT_ONBOARDING_DB_ID = "f8cb88da-6105-4d0b-91e4-82254fc08898"
-DEFAULT_OM_CONTRACTS_DB_ID = "cf7d120d-1fb6-4cda-a21a-5f6d5ffccf47"
-DEFAULT_OM_BILLING_DB_ID = "1603fd36-1a47-4387-9189-67348febe134"
+# Notion API expects database IDs (page IDs), not collection:// data-source IDs.
+DEFAULT_ONBOARDING_DB_ID = "bd47f0ec-8aa7-4f45-9908-accdf882e4eb"
+DEFAULT_OM_CONTRACTS_DB_ID = "7dc7ccc4-5c5a-43d7-a75b-2e97818089dc"
+DEFAULT_OM_BILLING_DB_ID = "39212e37-c38b-4c79-b1cd-8e54c976f7ea"
 
 SPV_MAP: dict[str, str] = {
     "Olympus Solar 2 Ltd": "OS2",
