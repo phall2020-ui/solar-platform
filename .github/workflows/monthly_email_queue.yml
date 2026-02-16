@@ -36,6 +36,7 @@ on:
 jobs:
   queue-monthly-email:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (
@@ -63,12 +64,16 @@ jobs:
             exit 0
           fi
 
+          # Allow a small retry window at month start in case day-1 run fails.
+          # Script is idempotent for the same month+run type, so repeated runs
+          # in this window are safe.
           DAY="$(date -u +%d)"
-          if [ "${DAY}" = "01" ]; then
+          GRACE_DAYS="${SYNC_MONTH_CLOSE_GRACE_DAYS:-3}"
+          if [ "$((10#${DAY}))" -le "$((10#${GRACE_DAYS}))" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Not day 1 (day=${DAY}). Skipping."
+            echo "Not in month-close window (day=${DAY}, grace=${GRACE_DAYS}). Skipping."
           fi
 
       - name: Checkout code

@@ -21,6 +21,7 @@ concurrency:
 jobs:
   sync-data:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: tools/inverter-data-juggle
