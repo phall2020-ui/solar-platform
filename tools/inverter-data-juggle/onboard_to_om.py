@@ -20,6 +20,12 @@ DEFAULT_ONBOARDING_DB_ID = "bd47f0ec-8aa7-4f45-9908-accdf882e4eb"
 DEFAULT_OM_CONTRACTS_DB_ID = "7dc7ccc4-5c5a-43d7-a75b-2e97818089dc"
 DEFAULT_OM_BILLING_DB_ID = "39212e37-c38b-4c79-b1cd-8e54c976f7ea"
 
+CONTRACT_TERM_YEARS_FIELDS = (
+    "Contract Term (Years)",
+    "Contract Term Years",
+    "Contract Years",
+)
+
 SPV_MAP: dict[str, str] = {
     "Olympus Solar 2 Ltd": "OS2",
     "Ultravolt SPV1 Limited": "UV1",
@@ -126,6 +132,10 @@ class NotionClient:
         db_id = _normalize_notion_id(database_id)
         return self._request("GET", f"/databases/{db_id}")
 
+    def get_page(self, page_id: str) -> dict[str, Any]:
+        pid = _normalize_notion_id(page_id)
+        return self._request("GET", f"/pages/{pid}")
+
     def query_database(
         self,
         database_id: str,
@@ -227,7 +237,39 @@ def _extract_contract_term(props: dict[str, Any], *, fallback_start: str = "") -
     return today, today
 
 
-def get_unlinked_onboarded_sites(
+def _extract_status_name(props: dict[str, Any], prop_name: str) -> str:
+    status_obj = props.get(prop_name, {}).get("status")
+    if not isinstance(status_obj, dict):
+        return ""
+    name = status_obj.get("name")
+    if not isinstance(name, str):
+        return ""
+    return name.strip()
+
+
+def _extract_positive_int_number(props: dict[str, Any], prop_names: tuple[str, ...]) -> int:
+    for prop_name in prop_names:
+        value = props.get(prop_name, {}).get("number")
+        try:
+            if value is None:
+                continue
+            number = int(float(value))
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            return number
+    return 0
+
+
+def _add_years(start: date, years: int) -> date:
+    try:
+        return start.replace(year=start.year + years)
+    except ValueError:
+        # Handle leap day rollover by moving to Feb 28 in non-leap years.
+        return start.replace(year=start.year + years, month=2, day=28)
+
+
+def get_unlinked_sites(
     notion: NotionClient,
     onboarding_db_id: str,
     *,
@@ -274,6 +316,11 @@ def build_contract_properties(
     cleaning_cost = _extract_number(site_props, "Cleaning Cost (£/yr)")
     onboard_date = str(site_props.get("Onboard Date", {}).get("date", {}).get("start") or "").strip()
     contract_start, contract_end = _extract_contract_term(site_props, fallback_start=onboard_date)
+    term_years = _extract_positive_int_number(site_props, CONTRACT_TERM_YEARS_FIELDS)
+    if onboard_date and term_years > 0:
+        start_date = date.fromisoformat(onboard_date)
+        contract_start = onboard_date
+        contract_end = _add_years(start_date, term_years).isoformat()
     contract_notes = _extract_rich_text(site_props, "Contract Notes")
 
     spv_full = _extract_select_name(site_props, "SPV")
@@ -328,6 +375,36 @@ def create_om_contract(
 
     contract_id = notion.create_page(om_contracts_db_id, properties)
     return contract_id, site_name, contract_start, contract_end, spv_short
+
+
+def set_onboarded_status_if_onboard_date(
+    notion: NotionClient,
+    *,
+    site_id: str,
+    site_props: dict[str, Any],
+    dry_run: bool,
+) -> None:
+    onboard_date = str(site_props.get("Onboard Date", {}).get("date", {}).get("start") or "").strip()
+    if not onboard_date:
+        return
+
+    current_status = _extract_status_name(site_props, "Onboarding Status")
+    if current_status == "Onboarded":
+        return
+
+    if dry_run:
+        print("  dry-run: would set Onboarding Status -> Onboarded")
+        return
+
+    notion.update_page(
+        site_id,
+        properties={
+            "Onboarding Status": {
+                "status": {"name": "Onboarded"},
+            }
+        },
+    )
+    print("  updated Onboarding Status -> Onboarded")
 
 
 def last_day(year: int, month: int) -> str:
@@ -500,6 +577,11 @@ def parse_args() -> argparse.Namespace:
         help="Optional max number of sites to process in this run",
     )
     parser.add_argument(
+        "--page-id",
+        default=_env("ONBOARDING_PAGE_ID", ""),
+        help="Optional onboarding page ID to process (useful for webhook events)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Log actions without writing to Notion",
@@ -518,11 +600,21 @@ def run(args: argparse.Namespace) -> int:
     for db_id in (args.onboarding_db_id, args.om_contracts_db_id, args.om_billing_db_id):
         notion.get_database(db_id)
 
-    sites = get_unlinked_onboarded_sites(
-        notion,
-        args.onboarding_db_id,
-        onboarded_status=args.onboarded_status,
-    )
+    sites: list[dict[str, Any]]
+    if args.page_id:
+        page = notion.get_page(args.page_id)
+        props = page.get("properties", {})
+        has_contract_link = bool(_extract_relation(props, "Portfolio Contract"))
+        if has_contract_link:
+            print("Webhook page already linked to a portfolio contract; nothing to process.")
+            return 0
+        sites = [page]
+    else:
+        sites = get_unlinked_sites(
+            notion,
+            args.onboarding_db_id,
+            onboarded_status=args.onboarded_status,
+        )
 
     if args.limit > 0:
         sites = sites[: args.limit]
@@ -549,6 +641,18 @@ def run(args: argparse.Namespace) -> int:
         site_name = _extract_title(props, "Site Name") or f"<unknown:{site_id[:8]}>"
 
         print(f"\nProcessing {site_name}")
+
+        try:
+            set_onboarded_status_if_onboard_date(
+                notion,
+                site_id=site_id,
+                site_props=props,
+                dry_run=args.dry_run,
+            )
+        except Exception as exc:
+            failed += 1
+            print(f"  failed setting Onboarding Status: {exc}")
+            continue
 
         try:
             contract_id, resolved_site_name, contract_start, contract_end, spv_short = create_om_contract(

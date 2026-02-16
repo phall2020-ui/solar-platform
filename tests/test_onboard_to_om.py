@@ -120,3 +120,42 @@ def test_build_contract_properties_defaults_term_to_onboard_date(script: ModuleT
     _, _, contract_start, contract_end, _ = script.build_contract_properties(site_props)
     assert contract_start == "2026-03-10"
     assert contract_end == "2026-03-10"
+
+
+def test_build_contract_properties_uses_term_years(script: ModuleType) -> None:
+    site_props = {
+        "Site Name": {"title": [{"plain_text": "Term Years Site"}]},
+        "Onboard Date": {"date": {"start": "2026-02-16"}},
+        "Contract Term (Years)": {"number": 2},
+    }
+
+    _, _, contract_start, contract_end, _ = script.build_contract_properties(site_props)
+    assert contract_start == "2026-02-16"
+    assert contract_end == "2028-02-16"
+
+
+def test_set_onboarded_status_if_onboard_date(script: ModuleType) -> None:
+    class DummyNotion:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, object]] = []
+
+        def update_page(self, page_id: str, properties: object) -> None:
+            self.calls.append((page_id, properties))
+
+    notion = DummyNotion()
+    site_props = {
+        "Onboard Date": {"date": {"start": "2026-02-16"}},
+        "Onboarding Status": {"status": {"name": "Draft"}},
+    }
+
+    script.set_onboarded_status_if_onboard_date(
+        notion,
+        site_id="site-123",
+        site_props=site_props,
+        dry_run=False,
+    )
+
+    assert len(notion.calls) == 1
+    page_id, props = notion.calls[0]
+    assert page_id == "site-123"
+    assert props == {"Onboarding Status": {"status": {"name": "Onboarded"}}}
