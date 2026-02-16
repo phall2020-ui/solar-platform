@@ -91,3 +91,19 @@ def test_build_billing_properties_for_single_month(script: ModuleType) -> None:
     assert props["Billing Period"]["date"]["start"] == "2026-02-01"
     assert props["Billing Period"]["date"]["end"] == "2026-02-28"
     assert props["SPV"]["select"]["name"] == "FS"
+
+
+def test_create_om_contract_requires_term_end(script: ModuleType) -> None:
+    site_props = {
+        "Site Name": {"title": [{"plain_text": "Test Missing End"}]},
+        "Contract Term": {"date": {"start": "2028-02-16"}},
+    }
+
+    with pytest.raises(ValueError, match="Contract Term must be a date range"):
+        script.create_om_contract(
+            notion=None,  # type: ignore[arg-type]
+            om_contracts_db_id="dummy",
+            site_props=site_props,
+            provider_name="ClearSol",
+            dry_run=True,
+        )

@@ -215,8 +215,6 @@ def _extract_contract_term(props: dict[str, Any]) -> tuple[str, str]:
     term = props.get("Contract Term", {}).get("date") or {}
     start = str(term.get("start") or "").strip()
     end = str(term.get("end") or "").strip()
-    if start and not end:
-        end = start
     return start, end
 
 
@@ -312,7 +310,7 @@ def create_om_contract(
     )
 
     if not contract_start or not contract_end:
-        raise ValueError("Contract Term start/end is not set")
+        raise ValueError("Contract Term must be a date range (start and end)")
 
     if dry_run:
         return "dry-run-contract-id", site_name, contract_start, contract_end, spv_short
