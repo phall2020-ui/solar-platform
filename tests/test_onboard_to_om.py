@@ -93,17 +93,30 @@ def test_build_billing_properties_for_single_month(script: ModuleType) -> None:
     assert props["SPV"]["select"]["name"] == "FS"
 
 
-def test_create_om_contract_requires_term_end(script: ModuleType) -> None:
+def test_create_om_contract_defaults_term_end_to_start(script: ModuleType) -> None:
     site_props = {
         "Site Name": {"title": [{"plain_text": "Test Missing End"}]},
         "Contract Term": {"date": {"start": "2028-02-16"}},
     }
 
-    with pytest.raises(ValueError, match="Contract Term must be a date range"):
-        script.create_om_contract(
-            notion=None,  # type: ignore[arg-type]
-            om_contracts_db_id="dummy",
-            site_props=site_props,
-            provider_name="ClearSol",
-            dry_run=True,
-        )
+    _, _, contract_start, contract_end, _ = script.create_om_contract(
+        notion=None,  # type: ignore[arg-type]
+        om_contracts_db_id="dummy",
+        site_props=site_props,
+        provider_name="ClearSol",
+        dry_run=True,
+    )
+
+    assert contract_start == "2028-02-16"
+    assert contract_end == "2028-02-16"
+
+
+def test_build_contract_properties_defaults_term_to_onboard_date(script: ModuleType) -> None:
+    site_props = {
+        "Site Name": {"title": [{"plain_text": "No Contract Term"}]},
+        "Onboard Date": {"date": {"start": "2026-03-10"}},
+    }
+
+    _, _, contract_start, contract_end, _ = script.build_contract_properties(site_props)
+    assert contract_start == "2026-03-10"
+    assert contract_end == "2026-03-10"

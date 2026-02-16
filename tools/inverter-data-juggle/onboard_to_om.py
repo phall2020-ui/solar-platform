@@ -211,32 +211,47 @@ def _extract_relation(props: dict[str, Any], prop_name: str) -> list[dict[str, s
     return out
 
 
-def _extract_contract_term(props: dict[str, Any]) -> tuple[str, str]:
+def _extract_contract_term(props: dict[str, Any], *, fallback_start: str = "") -> tuple[str, str]:
     term = props.get("Contract Term", {}).get("date") or {}
     start = str(term.get("start") or "").strip()
     end = str(term.get("end") or "").strip()
-    return start, end
+    if start and end:
+        return start, end
+    if start:
+        return start, start
+    if end:
+        return end, end
+    if fallback_start:
+        return fallback_start, fallback_start
+    today = date.today().isoformat()
+    return today, today
 
 
 def get_unlinked_onboarded_sites(
     notion: NotionClient,
     onboarding_db_id: str,
     *,
-    onboarded_status: str = "Onboarded",
+    onboarded_status: str = "",
 ) -> list[dict[str, Any]]:
+    filters: list[dict[str, Any]] = [
+        {
+            "property": "Portfolio Contract",
+            "relation": {"is_empty": True},
+        }
+    ]
+    if onboarded_status:
+        filters.insert(
+            0,
+            {
+                "property": "Onboarding Status",
+                "status": {"equals": onboarded_status},
+            },
+        )
+
     return notion.query_database(
         onboarding_db_id,
         filter_payload={
-            "and": [
-                {
-                    "property": "Onboarding Status",
-                    "status": {"equals": onboarded_status},
-                },
-                {
-                    "property": "Portfolio Contract",
-                    "relation": {"is_empty": True},
-                },
-            ]
+            "and": filters
         },
     )
 
@@ -253,13 +268,12 @@ def build_contract_properties(
     if not site_name:
         raise ValueError("Site Name is missing")
 
-    contract_start, contract_end = _extract_contract_term(site_props)
-
     system_size = _extract_number(site_props, "System Size (kWp)")
     variable_rate = _extract_number(site_props, "Variable Rate (£/kWp)")
     cctv_cost = _extract_number(site_props, "CCTV Cost (£/yr)")
     cleaning_cost = _extract_number(site_props, "Cleaning Cost (£/yr)")
     onboard_date = str(site_props.get("Onboard Date", {}).get("date", {}).get("start") or "").strip()
+    contract_start, contract_end = _extract_contract_term(site_props, fallback_start=onboard_date)
     contract_notes = _extract_rich_text(site_props, "Contract Notes")
 
     spv_full = _extract_select_name(site_props, "SPV")
@@ -308,9 +322,6 @@ def create_om_contract(
         site_props,
         provider_name=provider_name,
     )
-
-    if not contract_start or not contract_end:
-        raise ValueError("Contract Term must be a date range (start and end)")
 
     if dry_run:
         return "dry-run-contract-id", site_name, contract_start, contract_end, spv_short
@@ -450,7 +461,7 @@ def link_contract_to_onboarding(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Create O&M contracts + billing entries from newly onboarded sites."
+        description="Create O&M contracts + billing entries from unlinked onboarding sites."
     )
     parser.add_argument(
         "--onboarding-db-id",
@@ -479,8 +490,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--onboarded-status",
-        default=_env("ONBOARDED_STATUS", "Onboarded"),
-        help="Status value that marks a site as ready",
+        default=_env("ONBOARDED_STATUS", ""),
+        help="Optional status filter. Leave empty to process any status.",
     )
     parser.add_argument(
         "--limit",
@@ -520,7 +531,12 @@ def run(args: argparse.Namespace) -> int:
         print("No new sites to process.")
         return 0
 
-    print(f"Found {len(sites)} onboarded site(s) without a portfolio contract.")
+    if args.onboarded_status:
+        print(
+            f"Found {len(sites)} site(s) with status '{args.onboarded_status}' without a portfolio contract."
+        )
+    else:
+        print(f"Found {len(sites)} site(s) without a portfolio contract.")
 
     processed = 0
     skipped = 0
