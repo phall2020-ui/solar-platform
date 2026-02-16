@@ -29,6 +29,40 @@ from solar_platform.db.legacy import get_db
 
 logger = logging.getLogger(__name__)
 
+
+# ── Cached data-fetching helpers ────────────────────────────────────
+
+
+@st.cache_data(ttl=300)
+def _cached_get_plants():
+    """Cached plant list fetch."""
+    return get_db().get_plants()
+
+
+@st.cache_data(ttl=300)
+def _cached_query_readings_df(plant_uid: str, start_date: str, end_date: str, limit: int = 100_000):
+    """Cached readings query."""
+    return get_db().query_readings_df(
+        plant_uid=plant_uid,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+    )
+
+
+@st.cache_data(ttl=300)
+def _cached_get_data_quality(plant_uid: str, start_iso: str, end_iso: str):
+    """Cached data quality fetch."""
+    from datetime import timezone
+    start = datetime.fromisoformat(start_iso)
+    end = datetime.fromisoformat(end_iso)
+    return get_db().get_data_quality(
+        plant_uid=plant_uid,
+        start=start,
+        end=end,
+    )
+
+
 # ── Constants ───────────────────────────────────────────────────────────
 
 _PRESETS: dict[str, tuple[int, str]] = {
@@ -68,11 +102,9 @@ def render() -> None:
     st.title("📡 Site Monitor")
     st.markdown("Live and historic performance monitoring for individual solar sites.")
 
-    db = get_db()
-
     # ── Plant selector ──────────────────────────────────────────────────
     try:
-        plants = db.get_plants()
+        plants = _cached_get_plants()
     except Exception as exc:
         st.error(f"Could not load plants: {exc}")
         logger.exception("Failed to load plants")
@@ -143,7 +175,7 @@ def render() -> None:
 
     with st.spinner("Loading readings…"):
         try:
-            df = db.query_readings_df(
+            df = _cached_query_readings_df(
                 plant_uid=plant.plant_uid,
                 start_date=start_str,
                 end_date=end_str,
@@ -170,7 +202,7 @@ def render() -> None:
     _render_kpi_cards(df, power_col, irr_col, plant)
 
     # ── Data quality indicator ─────────────────────────────────────────
-    _render_data_quality(db, plant, start_date, end_date)
+    _render_data_quality(plant, start_date, end_date)
 
     st.markdown("---")
 
@@ -245,13 +277,15 @@ def _render_kpi_cards(
         )
 
 
-def _render_data_quality(db: Any, plant: Any, start_date: date, end_date: date) -> None:
+def _render_data_quality(plant: Any, start_date: date, end_date: date) -> None:
     """Show a data completeness indicator."""
     try:
-        dq = db.get_data_quality(
+        start_iso = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc).isoformat()
+        end_iso = datetime.combine(end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc).isoformat()
+        dq = _cached_get_data_quality(
             plant_uid=plant.plant_uid,
-            start=datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc),
-            end=datetime.combine(end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc),
+            start_iso=start_iso,
+            end_iso=end_iso,
         )
         pct = dq.completeness_pct
         level = dq.level.value

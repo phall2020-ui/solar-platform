@@ -10,7 +10,7 @@ import duckdb
 import pandas as pd
 import streamlit as st
 
-from components import drag_drop_uploader
+from app.components import drag_drop_uploader
 from solar_platform.services.data_pull import JuggleDataPullService
 
 logger = logging.getLogger(__name__)

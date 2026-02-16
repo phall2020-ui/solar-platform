@@ -17,6 +17,14 @@ def _default_date_range() -> tuple[datetime, datetime]:
     return end - timedelta(days=30), end
 
 
+@st.cache_data(ttl=300)
+def _cached_comparative_run(start_iso: str, end_iso: str, plant_uids: tuple):
+    from datetime import datetime as _dt
+    start = _dt.fromisoformat(start_iso)
+    end = _dt.fromisoformat(end_iso)
+    return ComparativeEngine().run(start=start, end=end, plant_uids=list(plant_uids))
+
+
 def render() -> None:
     """Render comparative analysis dashboard."""
     st.markdown("## 📊 Comparative Analysis")
@@ -59,8 +67,7 @@ def _render_body() -> None:
     start = end - timedelta(days=int(days))
     uids = [option_to_uid[item] for item in selected]
 
-    engine = ComparativeEngine()
-    result = engine.run(start=start, end=end, plant_uids=uids)
+    result = _cached_comparative_run(start.isoformat(), end.isoformat(), tuple(uids))
 
     if result.table is None or result.table.empty:
         st.warning("No comparison data available for selected plants.")

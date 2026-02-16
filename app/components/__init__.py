@@ -1,39 +1,49 @@
-"""Convenience re-exports for Streamlit UI components.
-
-Several Streamlit pages import directly from the top-level `components` package
-(`from components import ...`). Streamlit adds the directory containing the
-entrypoint script (e.g. `app/`) to `sys.path`, so `components` resolves to
-`app/components/`.
-
-Keep this file lightweight: only re-export stable component helpers used across
-pages to avoid circular imports and unnecessary startup cost.
-"""
-
+"""Convenience re-exports for Streamlit UI components."""
 from __future__ import annotations
 
-# Sidebar/navigation
+# Sidebar/navigation — always needed at startup
 from .sidebar import get_navigation_state, render_sidebar
 
-# Background job monitoring
-from .job_monitor import check_job_completion, job_status_viewer, submit_background_job_button
+# Lazy-loaded module references (populated on first access)
+_lazy_cache: dict = {}
 
-# Data health & validation
-from .data_health import data_health_dashboard, data_quality_uploader
+def __getattr__(name: str):
+    """Lazy-load component helpers on first access."""
+    if name in _lazy_cache:
+        return _lazy_cache[name]
 
-# UX helpers
-from .ux import drag_drop_uploader
+    if name in ("check_job_completion", "job_status_viewer", "submit_background_job_button"):
+        from .job_monitor import check_job_completion, job_status_viewer, submit_background_job_button
+        _lazy_cache.update({
+            "check_job_completion": check_job_completion,
+            "job_status_viewer": job_status_viewer,
+            "submit_background_job_button": submit_background_job_button,
+        })
+        return _lazy_cache[name]
+
+    if name in ("data_health_dashboard", "data_quality_uploader"):
+        from .data_health import data_health_dashboard, data_quality_uploader
+        _lazy_cache.update({
+            "data_health_dashboard": data_health_dashboard,
+            "data_quality_uploader": data_quality_uploader,
+        })
+        return _lazy_cache[name]
+
+    if name == "drag_drop_uploader":
+        from .ux import drag_drop_uploader
+        _lazy_cache["drag_drop_uploader"] = drag_drop_uploader
+        return drag_drop_uploader
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
-    # Sidebar/navigation
     "get_navigation_state",
     "render_sidebar",
-    # Background jobs
     "check_job_completion",
     "job_status_viewer",
     "submit_background_job_button",
-    # Data health
     "data_health_dashboard",
     "data_quality_uploader",
-    # UX
     "drag_drop_uploader",
 ]

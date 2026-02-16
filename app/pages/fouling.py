@@ -13,6 +13,18 @@ from solar_platform.analysis.fouling import FoulingEngine
 from solar_platform.db.repository import PlantRepository
 
 
+# ---------------------------------------------------------------------------
+# Cached data fetch
+# ---------------------------------------------------------------------------
+
+@st.cache_data(ttl=300)
+def _cached_fouling(plant_uid: str, start_iso: str, end_iso: str):
+    """Cache fouling analysis results (5-min TTL)."""
+    start = datetime.fromisoformat(start_iso)
+    end = datetime.fromisoformat(end_iso)
+    return FoulingEngine().run(plant_uid, start, end)
+
+
 def render() -> None:
     """Render the Fouling Analysis page."""
     st.markdown("## 🧹 Fouling Analysis")
@@ -54,7 +66,7 @@ def _render_body() -> None:
     start = end - timedelta(days=int(days))
 
     with st.spinner("Running fouling analysis…"):
-        result = FoulingEngine().run(plant_map[name], start, end)
+        result = _cached_fouling(plant_map[name], start.isoformat(), end.isoformat())
 
     if not result.has_data:
         st.warning("No data available for the selected period.")

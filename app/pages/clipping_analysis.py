@@ -15,6 +15,23 @@ from solar_platform.db.repository import PlantRepository
 
 
 # ---------------------------------------------------------------------------
+# Cached data fetch
+# ---------------------------------------------------------------------------
+
+@st.cache_data(ttl=300)
+def _cached_clipping(plant_uid: str, start_iso: str, end_iso: str,
+                     plateau_quantile: float, min_irradiance: int):
+    """Cache clipping analysis results (5-min TTL)."""
+    start_dt = datetime.fromisoformat(start_iso)
+    end_dt = datetime.fromisoformat(end_iso)
+    return ClippingEngine().run(
+        plant_uid, start_dt, end_dt,
+        plateau_quantile=plateau_quantile,
+        min_irradiance=min_irradiance,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -126,11 +143,10 @@ def render():
                 help="Minimum irradiance for clipping to be meaningful.",
             )
 
-    # --- Run engine ---------------------------------------------------------
-    engine = ClippingEngine()
+    # --- Run engine (cached) ------------------------------------------------
     with st.spinner("Running clipping analysis..."):
-        result = engine.run(
-            plant_uid, start_dt, end_dt,
+        result = _cached_clipping(
+            plant_uid, start_dt.isoformat(), end_dt.isoformat(),
             plateau_quantile=plateau_quantile,
             min_irradiance=min_irradiance,
         )

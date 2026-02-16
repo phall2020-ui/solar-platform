@@ -15,6 +15,22 @@ from solar_platform.db.repository import PlantRepository
 
 
 # ---------------------------------------------------------------------------
+# Cached data fetch
+# ---------------------------------------------------------------------------
+
+@st.cache_data(ttl=300)
+def _cached_curtailment(plant_uid: str, start_iso: str, end_iso: str,
+                       limit_threshold_pct: int):
+    """Cache curtailment analysis results (5-min TTL)."""
+    start_dt = datetime.fromisoformat(start_iso)
+    end_dt = datetime.fromisoformat(end_iso)
+    return CurtailmentEngine().run(
+        plant_uid, start_dt, end_dt,
+        limit_threshold_pct=limit_threshold_pct,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -124,11 +140,10 @@ def _render_body():
             help="Records with export limit below this percentage are considered curtailed.",
         )
 
-    # --- Run engine ---------------------------------------------------------
-    engine = CurtailmentEngine()
+    # --- Run engine (cached) ------------------------------------------------
     with st.spinner("Running curtailment analysis..."):
-        result = engine.run(
-            plant_uid, start_dt, end_dt,
+        result = _cached_curtailment(
+            plant_uid, start_dt.isoformat(), end_dt.isoformat(),
             limit_threshold_pct=limit_threshold_pct,
         )
 

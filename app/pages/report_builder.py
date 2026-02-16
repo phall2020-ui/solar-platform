@@ -161,6 +161,7 @@ UTC = timezone.utc
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
+@st.cache_data(ttl=300)
 def _get_plant_options() -> list[dict[str, str]]:
     """Return list of ``{uid, alias}`` dicts from the plant repository."""
     if not _PLANT_REPO_AVAILABLE:

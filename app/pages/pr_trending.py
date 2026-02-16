@@ -12,6 +12,14 @@ from solar_platform.analysis.pr_trending import PRTrendingEngine
 from solar_platform.db.repository import PlantRepository
 
 
+@st.cache_data(ttl=300)
+def _cached_pr_trending(plant_uid: str, start_iso: str, end_iso: str, rolling_window_days: int = 7):
+    from datetime import datetime as _dt
+    start = _dt.fromisoformat(start_iso)
+    end = _dt.fromisoformat(end_iso)
+    return PRTrendingEngine().run(plant_uid, start, end, rolling_window_days=rolling_window_days)
+
+
 def render() -> None:
     st.markdown("## 📈 PR Trending")
 
@@ -48,7 +56,7 @@ def _render_body() -> None:
     end = datetime.now(UTC)
     start = end - timedelta(days=int(days))
 
-    result = PRTrendingEngine().run(plant_map[name], start, end, rolling_window_days=window)
+    result = _cached_pr_trending(plant_map[name], start.isoformat(), end.isoformat(), rolling_window_days=window)
     if result.timeseries is None or result.timeseries.empty:
         st.warning("No PR trend data available.")
         return

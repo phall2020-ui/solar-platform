@@ -31,6 +31,32 @@ def _to_df(alerts):
     )
 
 
+@st.cache_data(ttl=300)
+def _cached_alerts_df(severity_val: str | None, status_val: str | None) -> pd.DataFrame:
+    """Fetch alerts and return as DataFrame (cached)."""
+    repo = AlertRepository()
+    severity = AlertSeverity(severity_val) if severity_val else None
+    status = AlertStatus(status_val) if status_val else None
+    alerts = repo.list_alerts(severity=severity, status=status)
+    return _to_df(alerts)
+
+
+@st.cache_data(ttl=300)
+def _cached_alert_metrics() -> tuple[int, int, int]:
+    """Return (active_count, critical_active_count, total_count)."""
+    repo = AlertRepository()
+    active = len(repo.list_alerts(status=AlertStatus.ACTIVE))
+    critical = len(repo.list_alerts(status=AlertStatus.ACTIVE, severity=AlertSeverity.CRITICAL))
+    total = len(repo.list_alerts())
+    return active, critical, total
+
+
+def _clear_alert_caches() -> None:
+    """Clear all alert caches after mutations."""
+    _cached_alerts_df.clear()
+    _cached_alert_metrics.clear()
+
+
 def render() -> None:
     st.markdown("## 🚨 Alerts Dashboard")
     repo = AlertRepository()
@@ -40,6 +66,7 @@ def render() -> None:
     c1, c2, c3 = st.columns(3)
     if c1.button("Evaluate All Rules", use_container_width=True):
         new_alerts = engine.evaluate_all()
+        _clear_alert_caches()
         st.success(f"Evaluation complete. Triggered {len(new_alerts)} alerts.")
 
     if c2.button("Seed Default Rules", use_container_width=True):
@@ -54,16 +81,15 @@ def render() -> None:
         index=0,
     )
 
-    severity = None if sev == "all" else AlertSeverity(sev)
-    status = None if status_filter == "all" else AlertStatus(status_filter)
+    sev_val = None if sev == "all" else sev
+    status_val = None if status_filter == "all" else status_filter
+    df = _cached_alerts_df(sev_val, status_val)
 
-    alerts = repo.list_alerts(severity=severity, status=status)
-    df = _to_df(alerts)
-
+    active_count, critical_count, total_count = _cached_alert_metrics()
     m1, m2, m3 = st.columns(3)
-    m1.metric("Active", len(repo.list_alerts(status=AlertStatus.ACTIVE)))
-    m2.metric("Critical Active", len(repo.list_alerts(status=AlertStatus.ACTIVE, severity=AlertSeverity.CRITICAL)))
-    m3.metric("Total Alerts", len(repo.list_alerts()))
+    m1.metric("Active", active_count)
+    m2.metric("Critical Active", critical_count)
+    m3.metric("Total Alerts", total_count)
 
     if df.empty:
         st.info("No alerts for current filters.")
@@ -72,15 +98,18 @@ def render() -> None:
     st.dataframe(df, use_container_width=True, hide_index=True)
 
     st.markdown("### Actions")
-    for alert in alerts[:20]:
-        with st.expander(f"{alert.title} | {alert.plant_uid} | {alert.status.value}"):
+    for _, row in df.head(20).iterrows():
+        with st.expander(f"{row['title']} | {row['plant_uid']} | {row['status']}"):
             b1, b2, b3 = st.columns(3)
-            if b1.button("Acknowledge", key=f"ack_{alert.id}", disabled=alert.status == AlertStatus.RESOLVED):
-                state.acknowledge(alert.id, user="ui")
+            if b1.button("Acknowledge", key=f"ack_{row['id']}", disabled=row['status'] == 'resolved'):
+                state.acknowledge(row['id'], user="ui")
+                _clear_alert_caches()
                 st.rerun()
-            if b2.button("Resolve", key=f"res_{alert.id}"):
-                state.resolve(alert.id, user="ui")
+            if b2.button("Resolve", key=f"res_{row['id']}"):
+                state.resolve(row['id'], user="ui")
+                _clear_alert_caches()
                 st.rerun()
-            if b3.button("Suppress", key=f"sup_{alert.id}"):
-                state.suppress(alert.id)
+            if b3.button("Suppress", key=f"sup_{row['id']}"):
+                state.suppress(row['id'])
+                _clear_alert_caches()
                 st.rerun()

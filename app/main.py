@@ -25,11 +25,13 @@ from solar_platform.services.user_preferences import init_preferences_in_session
 from styles import apply_theme
 from app.config_compat import config
 
-try:
-    setup_logging()
-    get_logger("app.startup").info("structured_logging_initialized")
-except Exception:
-    logging.getLogger(__name__).exception("Failed to initialize structured logging")
+if "logging_initialized" not in st.session_state:
+    try:
+        setup_logging()
+        get_logger("app.startup").info("structured_logging_initialized")
+        st.session_state["logging_initialized"] = True
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to initialize structured logging")
 
 # Configure the page
 st.set_page_config(**config.get_page_config())
@@ -37,10 +39,26 @@ st.set_page_config(**config.get_page_config())
 # Apply AMPYR branding
 apply_theme()
 
+
+@st.cache_resource
+def _cached_error_handler():
+    return get_error_handler()
+
+
+@st.cache_resource
+def _cached_init_preferences(db_path: str):
+    return init_preferences_in_session(db_path)
+
+
+@st.cache_resource
+def _cached_init_search(toolkit_db: str, reporting_db: str):
+    return init_search_in_session(toolkit_db, reporting_db)
+
+
 # Initialize Phase 1 services
-init_preferences_in_session(str(config.REPORTING_DB))
-error_handler = get_error_handler()
-init_search_in_session(str(config.TOOLKIT_DB), str(config.REPORTING_DB))
+_cached_init_preferences(str(config.REPORTING_DB))
+error_handler = _cached_error_handler()
+_cached_init_search(str(config.TOOLKIT_DB), str(config.REPORTING_DB))
 init_shortcuts_in_session()
 
 # Inject keyboard shortcuts

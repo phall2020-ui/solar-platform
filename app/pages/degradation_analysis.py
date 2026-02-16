@@ -12,6 +12,14 @@ from solar_platform.analysis.degradation import DegradationEngine
 from solar_platform.db.repository import PlantRepository
 
 
+@st.cache_data(ttl=300)
+def _cached_degradation(plant_uid: str, start_iso: str, end_iso: str):
+    from datetime import datetime as _dt
+    start = _dt.fromisoformat(start_iso)
+    end = _dt.fromisoformat(end_iso)
+    return DegradationEngine().run(plant_uid, start, end)
+
+
 def render() -> None:
     st.markdown("## 📉 Degradation Analysis")
     st.caption("Annualized PR trend estimation from monthly medians.")
@@ -47,7 +55,7 @@ def _render_body() -> None:
     end = datetime.now(UTC)
     start = end - timedelta(days=365 * int(years))
 
-    result = DegradationEngine().run(plant_map[plant], start, end)
+    result = _cached_degradation(plant_map[plant], start.isoformat(), end.isoformat())
     if result.timeseries is None or result.timeseries.empty:
         st.warning("No degradation data available.")
         for warning in result.warnings:

@@ -7,7 +7,7 @@ import time
 import pandas as pd
 import streamlit as st
 
-from components import (
+from app.components import (
     check_job_completion,
     data_health_dashboard,
     data_quality_uploader,

@@ -69,6 +69,18 @@ DEMO_PLANTS = [
 ]
 
 
+# ── Cached DB query ──────────────────────────────────────────────────
+
+
+@st.cache_data(ttl=300)
+def _cached_query_readings(plant_uid: str, start_iso: str, end_iso: str):
+    """Cache the expensive DB readings query shared by anomaly + timeseries loaders."""
+    from solar_platform.db.legacy import get_db
+    db = get_db()
+    df = db.query_readings_df(plant_uid, start_date=start_iso, end_date=end_iso)
+    return df
+
+
 # ── Demo data ────────────────────────────────────────────────────────
 
 
@@ -292,7 +304,6 @@ def _load_anomalies(plant: str, days: int, method: str, min_confidence: float) -
     if ANOMALY_SERVICE_AVAILABLE:
         try:
             from datetime import date as _date
-            from solar_platform.db.legacy import get_db
 
             svc = AnomalyService()
 
@@ -308,10 +319,9 @@ def _load_anomalies(plant: str, days: int, method: str, min_confidence: float) -
                     pass
 
             # Fetch readings for the date range
-            db = get_db()
             end = _date.today()
             start = end - timedelta(days=days)
-            df = db.query_readings_df(plant_uid, start_date=start.isoformat(), end_date=end.isoformat())
+            df = _cached_query_readings(plant_uid, start.isoformat(), end.isoformat())
 
             if df is not None and not df.empty:
                 # Rename columns to match what the anomaly detectors expect
@@ -362,7 +372,6 @@ def _load_timeseries(plant: str, days: int) -> pd.DataFrame:
     if ANOMALY_SERVICE_AVAILABLE:
         try:
             from datetime import date as _date
-            from solar_platform.db.legacy import get_db
 
             # Resolve plant alias → plant_uid
             plant_uid = plant
@@ -375,10 +384,9 @@ def _load_timeseries(plant: str, days: int) -> pd.DataFrame:
                 except Exception:
                     pass
 
-            db = get_db()
             end = _date.today()
             start = end - timedelta(days=days)
-            df = db.query_readings_df(plant_uid, start_date=start.isoformat(), end_date=end.isoformat())
+            df = _cached_query_readings(plant_uid, start.isoformat(), end.isoformat())
 
             if df is not None and not df.empty:
                 result = pd.DataFrame()

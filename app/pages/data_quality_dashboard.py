@@ -310,6 +310,7 @@ def render() -> None:
 # ── Data loaders ─────────────────────────────────────────────────────
 
 
+@st.cache_data(ttl=300)
 def _load_quality_scores() -> dict[str, float]:
     if QUALITY_SCORER_AVAILABLE and PLANT_REPO_AVAILABLE:
         try:
@@ -347,6 +348,7 @@ def _load_quality_scores() -> dict[str, float]:
     return _demo_quality_scores()
 
 
+@st.cache_data(ttl=300)
 def _load_completeness_matrix(days: int) -> pd.DataFrame:
     if GAP_DETECTION_AVAILABLE and PLANT_REPO_AVAILABLE:
         try:
@@ -379,6 +381,7 @@ def _load_completeness_matrix(days: int) -> pd.DataFrame:
     return _demo_completeness_matrix(days)
 
 
+@st.cache_data(ttl=300)
 def _load_validation_failures() -> pd.DataFrame:
     if VALIDATORS_AVAILABLE and PLANT_REPO_AVAILABLE:
         try:
@@ -413,6 +416,7 @@ def _load_validation_failures() -> pd.DataFrame:
     return _demo_validation_failures()
 
 
+@st.cache_data(ttl=300)
 def _load_gaps() -> pd.DataFrame:
     if GAP_DETECTION_AVAILABLE and PLANT_REPO_AVAILABLE:
         try:
@@ -452,6 +456,7 @@ def _load_gaps() -> pd.DataFrame:
     return _demo_gaps()
 
 
+@st.cache_data(ttl=300)
 def _load_sensor_health() -> dict[str, dict]:
     if SENSOR_HEALTH_AVAILABLE and PLANT_REPO_AVAILABLE:
         try:

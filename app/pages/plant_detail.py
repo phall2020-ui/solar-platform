@@ -14,6 +14,33 @@ from app.components.kpi_cards import render_kpi_row, render_status_badge
 from solar_platform.services.plant import PlantService
 
 
+# ── Cached data loaders ──────────────────────────────────────────────
+
+
+@st.cache_data(ttl=300)
+def _cached_get_plant(plant_uid: str):
+    """Fetch plant metadata (cached)."""
+    return PlantService().get_plant(plant_uid)
+
+
+@st.cache_data(ttl=300)
+def _cached_daily_summary(plant_uid: str):
+    """Fetch daily summary KPIs (cached)."""
+    return PlantService().get_daily_summary(plant_uid)
+
+
+@st.cache_data(ttl=300)
+def _cached_production_data(plant_uid: str, days: int):
+    """Fetch production data for a time range (cached)."""
+    return PlantService().get_production_data(plant_uid, days=days)
+
+
+@st.cache_data(ttl=300)
+def _cached_get_devices(plant_uid: str):
+    """Fetch device list for a plant (cached)."""
+    return PlantService().get_devices(plant_uid)
+
+
 def render():
     """Render plant detail view (entry point from page registry)."""
     render_plant_detail()
@@ -30,8 +57,7 @@ def render_plant_detail():
             st.rerun()
         return
 
-    service = PlantService()
-    plant = service.get_plant(plant_uid)
+    plant = _cached_get_plant(plant_uid)
 
     if not plant:
         st.error(f"Plant not found: {plant_uid}")
@@ -71,24 +97,24 @@ def render_plant_detail():
     )
 
     with tab_overview:
-        _render_overview(service, plant_uid, plant)
+        _render_overview(plant_uid, plant)
 
     with tab_production:
-        _render_production(service, plant_uid)
+        _render_production(plant_uid)
 
     with tab_environmental:
-        _render_environmental(service, plant_uid)
+        _render_environmental(plant_uid)
 
     with tab_devices:
-        _render_devices(service, plant_uid)
+        _render_devices(plant_uid)
 
     with tab_history:
-        _render_history(service, plant_uid)
+        _render_history(plant_uid)
 
 
-def _render_overview(service: PlantService, plant_uid: str, plant: dict):
+def _render_overview(plant_uid: str, plant: dict):
     """Plant overview tab with KPIs."""
-    summary = service.get_daily_summary(plant_uid)
+    summary = _cached_daily_summary(plant_uid)
 
     render_kpi_row([
         {
@@ -133,11 +159,11 @@ def _render_overview(service: PlantService, plant_uid: str, plant: dict):
             st.caption(f"Source: {notion_url}")
 
 
-def _render_production(service: PlantService, plant_uid: str):
+def _render_production(plant_uid: str):
     """Production tab — charts and data."""
     st.subheader("Production Data")
     days = st.selectbox("Time range", [7, 14, 30, 90], index=1, format_func=lambda d: f"Last {d} days")
-    df = service.get_production_data(plant_uid, days=days)
+    df = _cached_production_data(plant_uid, days=days)
     if df.empty:
         st.info("No production data available for this period.")
     else:
@@ -145,17 +171,17 @@ def _render_production(service: PlantService, plant_uid: str):
     st.caption("For detailed analysis, use Clipping Analysis or Curtailment Analysis modules.")
 
 
-def _render_environmental(service: PlantService, plant_uid: str):
+def _render_environmental(plant_uid: str):
     """Environmental tab — irradiance, temperature, wind."""
     st.subheader("Environmental Data")
     st.info("🌤️ Environmental data — irradiance, temperature, and wind readings will be displayed here.")
     st.caption("Detailed environmental analysis is available in the Shading and Thermal Loss modules.")
 
 
-def _render_devices(service: PlantService, plant_uid: str):
+def _render_devices(plant_uid: str):
     """Devices tab — inverters, meters, sensors."""
     st.subheader("Registered Devices")
-    devices = service.get_devices(plant_uid)
+    devices = _cached_get_devices(plant_uid)
     if not devices:
         st.info("No devices found for this plant.")
         return
@@ -168,7 +194,7 @@ def _render_devices(service: PlantService, plant_uid: str):
             st.caption(device.get("type", "unknown"))
 
 
-def _render_history(service: PlantService, plant_uid: str):
+def _render_history(plant_uid: str):
     """History tab — historical data explorer."""
     st.subheader("Historical Data")
     st.info("📜 Historical data explorer — browse past readings and events.")

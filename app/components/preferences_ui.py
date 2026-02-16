@@ -360,10 +360,22 @@ def _render_preferences_actions(prefs: UserPreferences):
                 st.error(f"Failed to import: {e}")
     
     with col3:
-        if st.button("🔄 Reset to Defaults", type="primary"):
-            if st.button("⚠️ Confirm Reset"):
-                prefs.reset()
-                st.success("✓ All preferences reset to defaults")
+        if st.session_state.get("_confirm_reset", False):
+            st.warning("⚠️ This will reset ALL preferences to defaults.")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("✅ Yes, Reset", type="primary"):
+                    prefs.reset()
+                    st.session_state["_confirm_reset"] = False
+                    st.success("✓ All preferences reset to defaults")
+                    st.rerun()
+            with c2:
+                if st.button("Cancel"):
+                    st.session_state["_confirm_reset"] = False
+                    st.rerun()
+        else:
+            if st.button("🔄 Reset to Defaults", type="primary"):
+                st.session_state["_confirm_reset"] = True
                 st.rerun()
 
 

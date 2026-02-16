@@ -94,6 +94,7 @@ def _demo_current_tariff(plant: str) -> dict:
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
+@st.cache_data(ttl=300)
 def _get_plant_list() -> list[str]:
     if PLANT_REPO_AVAILABLE:
         try:
@@ -155,6 +156,7 @@ def render() -> None:
 # ── Data loaders ─────────────────────────────────────────────────────
 
 
+@st.cache_data(ttl=300)
 def _load_current_tariff(plant: str) -> dict:
     if TARIFF_AVAILABLE:
         try:
@@ -184,6 +186,7 @@ def _load_current_tariff(plant: str) -> dict:
     return _demo_current_tariff(plant)
 
 
+@st.cache_data(ttl=300)
 def _load_tariff_history(plant: str) -> pd.DataFrame:
     if TARIFF_AVAILABLE:
         try:
@@ -307,7 +310,24 @@ def _render_tariff_form(plant: str) -> None:
                 if TARIFF_AVAILABLE:
                     try:
                         mgr = TariffManager()
-                        mgr.save(tariff_data)
+                        # Resolve alias → plant_uid
+                        plant_uid = plant
+                        if PLANT_REPO_AVAILABLE:
+                            try:
+                                repo = PlantRepository()
+                                p = repo.get_by_alias(plant)
+                                if p:
+                                    plant_uid = p["plant_uid"]
+                            except Exception:
+                                pass
+                        mgr.set_tariff(
+                            plant_uid=plant_uid,
+                            tariff_type=tariff_type,
+                            rate=rate,
+                            start_date=start_date,
+                            end_date=end_date,
+                            escalation_pct=escalation,
+                        )
                         st.success(f"✅ Tariff saved for {plant}")
                     except Exception as e:
                         st.error(f"Failed to save: {e}")
@@ -365,9 +385,17 @@ def _render_csv_import() -> None:
             if st.button("📥 Import All", key="tariff_import_btn"):
                 if TARIFF_AVAILABLE:
                     try:
+                        import tempfile
                         mgr = TariffManager()
-                        mgr.bulk_import(csv_df.to_dict("records"))
-                        st.success(f"✅ Imported {len(csv_df)} tariff records")
+                        # Remap columns to match TariffManager.import_from_csv expectations
+                        import_df = csv_df.rename(columns={
+                            "plant": "plant_uid",
+                            "rate_per_mwh": "rate",
+                        })
+                        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
+                            import_df.to_csv(tmp.name, index=False)
+                            count = mgr.import_from_csv(tmp.name)
+                        st.success(f"✅ Imported {count} tariff records")
                     except Exception as e:
                         st.error(f"Import failed: {e}")
                 else:

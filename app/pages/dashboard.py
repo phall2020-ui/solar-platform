@@ -22,6 +22,34 @@ from app.config_compat import config
 
 logger = logging.getLogger(__name__)
 
+
+# ── Cached data-fetching helpers ────────────────────────────────────
+
+
+@st.cache_data(ttl=300)
+def _cached_get_summary(time_range: str):
+    """Cached portfolio summary fetch."""
+    return PortfolioService().get_summary(time_range)
+
+
+@st.cache_data(ttl=300)
+def _cached_get_plant_statuses(time_range: str):
+    """Cached plant statuses fetch."""
+    return PortfolioService().get_plant_statuses(time_range)
+
+
+@st.cache_data(ttl=300)
+def _cached_get_generation_trend(days: int):
+    """Cached generation trend fetch."""
+    return PortfolioService().get_generation_trend(days=days)
+
+
+@st.cache_data(ttl=300)
+def _cached_get_alert_summary():
+    """Cached alert summary fetch."""
+    return PortfolioService().get_alert_summary()
+
+
 # Backwards-compat: conditionally import system health widget
 try:
     from app.pages.system_health import render_system_health_widget
@@ -50,11 +78,9 @@ def render():
             label_visibility="collapsed",
         )
 
-    # Load portfolio summary from service
-    portfolio = PortfolioService()
-
+    # Load portfolio summary from service (cached)
     try:
-        summary = portfolio.get_summary(time_range)
+        summary = _cached_get_summary(time_range)
     except Exception as e:
         logger.error("Failed to load portfolio summary: %s", e)
         st.error(f"Could not load portfolio data: {e}")
@@ -131,7 +157,7 @@ def render():
             key="dashboard_status_filter",
         )
 
-    plants = portfolio.get_plant_statuses(time_range)
+    plants = _cached_get_plant_statuses(time_range)
 
     # Apply filters
     if search:
@@ -167,7 +193,7 @@ def render():
 
     with col_chart:
         st.subheader("Portfolio Generation Trend")
-        trend = portfolio.get_generation_trend(days=7)
+        trend = _cached_get_generation_trend(days=7)
         if trend:
             fig = _build_trend_chart(trend)
             st.plotly_chart(fig, use_container_width=True)
@@ -176,7 +202,7 @@ def render():
 
     with col_alerts:
         st.subheader("Alert Summary")
-        alerts = portfolio.get_alert_summary()
+        alerts = _cached_get_alert_summary()
         if alerts:
             for alert in alerts:
                 icon = (

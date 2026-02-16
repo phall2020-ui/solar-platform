@@ -21,6 +21,14 @@ _ICONS = {
 }
 
 
+@st.cache_data(ttl=300)
+def _cached_loss_waterfall(plant_uid: str, start_iso: str, end_iso: str):
+    from datetime import datetime as _dt
+    start = _dt.fromisoformat(start_iso)
+    end = _dt.fromisoformat(end_iso)
+    return LossWaterfallEngine().run(plant_uid, start, end)
+
+
 def render() -> None:
     """Render the Loss Waterfall page."""
     st.markdown("## 📊 Loss Waterfall")
@@ -62,7 +70,7 @@ def _render_body() -> None:
     start = end - timedelta(days=int(days))
 
     with st.spinner("Running all loss engines…"):
-        result = LossWaterfallEngine().run(plant_map[name], start, end)
+        result = _cached_loss_waterfall(plant_map[name], start.isoformat(), end.isoformat())
 
     if not result.has_data:
         st.warning("No data available for the selected period.")

@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from solar_platform.services.data_pull import JuggleDataPullService
-from styles import render_alert, render_divider, render_section_header
+from app.styles import render_alert, render_divider, render_section_header
 
 logger = logging.getLogger(__name__)
 

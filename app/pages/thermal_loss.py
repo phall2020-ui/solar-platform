@@ -12,6 +12,21 @@ from solar_platform.analysis.thermal import ThermalLossEngine
 from solar_platform.db.repository import PlantRepository
 
 
+# ---------------------------------------------------------------------------
+# Cached data fetch
+# ---------------------------------------------------------------------------
+
+@st.cache_data(ttl=300)
+def _cached_thermal(plant_uid: str, start_iso: str, end_iso: str,
+                   gamma_pct_per_c: float):
+    """Cache thermal loss analysis results (5-min TTL)."""
+    start = datetime.fromisoformat(start_iso)
+    end = datetime.fromisoformat(end_iso)
+    return ThermalLossEngine().run(
+        plant_uid, start, end, gamma_pct_per_c=gamma_pct_per_c,
+    )
+
+
 def render() -> None:
     """Render the Thermal Loss Analysis page."""
     st.markdown("## 🌡️ Thermal Loss Analysis")
@@ -62,8 +77,9 @@ def _render_body() -> None:
     start = end - timedelta(days=int(days))
 
     with st.spinner("Running thermal loss analysis…"):
-        result = ThermalLossEngine().run(
-            plant_map[name], start, end, gamma_pct_per_c=gamma,
+        result = _cached_thermal(
+            plant_map[name], start.isoformat(), end.isoformat(),
+            gamma_pct_per_c=gamma,
         )
 
     if not result.has_data:

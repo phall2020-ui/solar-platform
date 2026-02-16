@@ -262,6 +262,7 @@ def render() -> None:
 # ── Data loaders ─────────────────────────────────────────────────────
 
 
+@st.cache_data(ttl=300)
 def _load_monthly_revenue(year: int) -> pd.DataFrame:
     if REVENUE_AVAILABLE and BUDGET_AVAILABLE:
         try:
@@ -308,6 +309,7 @@ def _load_monthly_revenue(year: int) -> pd.DataFrame:
     return _demo_monthly_revenue(year)
 
 
+@st.cache_data(ttl=300)
 def _load_plant_breakdown(year: int) -> pd.DataFrame:
     if REVENUE_AVAILABLE:
         try:
@@ -347,7 +349,41 @@ def _load_plant_breakdown(year: int) -> pd.DataFrame:
 
 def _calc_ytd(monthly_df: pd.DataFrame) -> dict:
     """Calculate YTD summary from the monthly revenue DataFrame."""
-    return _demo_ytd_summary(monthly_df)
+    ytd_actual = monthly_df["actual"].sum()
+    ytd_budget = monthly_df["budget"].sum()
+    variance = ytd_actual - ytd_budget
+    variance_pct = (variance / ytd_budget * 100) if ytd_budget else 0.0
+
+    # Derive average tariff from actual revenue and generation if available
+    avg_tariff = 0.0
+    if TARIFF_AVAILABLE:
+        try:
+            from solar_platform.financial.tariff import TariffManager
+            mgr = TariffManager()
+            from solar_platform.db.repository import PlantRepository
+            repo = PlantRepository()
+            rates = []
+            for alias in repo.list_aliases():
+                p = repo.get_by_alias(alias)
+                if p:
+                    t = mgr.get_tariff(p["plant_uid"])
+                    if t and t.get("rate"):
+                        rates.append(float(t["rate"]))
+            if rates:
+                avg_tariff = round(sum(rates) / len(rates), 2)
+        except Exception:
+            pass
+    if avg_tariff == 0.0:
+        # Fallback: estimate from revenue/budget ratio
+        avg_tariff = round(ytd_actual / max(ytd_budget, 1) * 60, 2)
+
+    return {
+        "ytd_revenue": ytd_actual,
+        "ytd_budget": ytd_budget,
+        "variance": variance,
+        "variance_pct": variance_pct,
+        "avg_tariff": avg_tariff,
+    }
 
 
 # ── Chart renderers ──────────────────────────────────────────────────

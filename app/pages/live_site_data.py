@@ -45,6 +45,40 @@ def _get_plant_list() -> list[dict]:
     return svc.get_plant_list()
 
 
+@st.cache_data(ttl=300)
+def _cached_get_device_list(plant_uid: str) -> list[str]:
+    """Cached device list fetch."""
+    return LiveDataService().get_device_list(plant_uid)
+
+
+@st.cache_data(ttl=300)
+def _cached_get_readings(plant_uid: str, selected_date: str, device_ids: tuple | None = None):
+    """Cached readings fetch."""
+    return LiveDataService().get_readings(
+        plant_uid, date.fromisoformat(selected_date),
+        device_ids=list(device_ids) if device_ids else None,
+    )
+
+
+@st.cache_data(ttl=300)
+def _cached_get_daily_kpis(plant_uid: str, selected_date: str) -> dict:
+    """Cached daily KPIs fetch."""
+    return LiveDataService().get_daily_kpis(plant_uid, date.fromisoformat(selected_date))
+
+
+@st.cache_data(ttl=300)
+def _cached_get_multi_day_readings(
+    plant_uid: str, start_date: str, end_date: str, device_ids: tuple | None = None,
+):
+    """Cached multi-day readings fetch."""
+    return LiveDataService().get_multi_day_readings(
+        plant_uid,
+        date.fromisoformat(start_date),
+        date.fromisoformat(end_date),
+        device_ids=list(device_ids) if device_ids else None,
+    )
+
+
 def _freshness_indicator(freshness: str | None) -> str:
     """Return a coloured dot + label for data freshness."""
     if not freshness:
@@ -145,7 +179,7 @@ def render() -> None:
 
         # Device filter
         try:
-            devices = svc.get_device_list(selected_uid)
+            devices = _cached_get_device_list(selected_uid)
         except Exception as exc:
             logger.warning("Could not load device list: %s", exc)
             devices = []
@@ -174,15 +208,16 @@ def render() -> None:
                 st.error(f"Refresh failed: {exc}")
 
     # ── Fetch day data ──────────────────────────────────────────────
+    device_ids_tuple = tuple(device_ids) if device_ids else None
     try:
-        df = svc.get_readings(selected_uid, selected_date, device_ids=device_ids)
+        df = _cached_get_readings(selected_uid, selected_date.isoformat(), device_ids=device_ids_tuple)
     except Exception as exc:
         logger.exception("Failed to load readings")
         st.error(f"Could not load readings: {exc}")
         df = pd.DataFrame()
 
     try:
-        kpis = svc.get_daily_kpis(selected_uid, selected_date)
+        kpis = _cached_get_daily_kpis(selected_uid, selected_date.isoformat())
     except Exception as exc:
         logger.exception("Failed to load KPIs")
         st.error(f"Could not load KPIs: {exc}")
@@ -241,7 +276,7 @@ def render() -> None:
 
     # ── Tab 2: Multi-day comparison ─────────────────────────────────
     with tab_multi:
-        _render_multi_day(svc, selected_uid, selected_alias, selected_date, device_ids)
+        _render_multi_day(selected_uid, selected_alias, selected_date, device_ids)
 
     # ── Raw Data (collapsible) ──────────────────────────────────────
     with st.expander("📋 Raw Data"):
@@ -330,7 +365,6 @@ def _render_daily_chart(df: pd.DataFrame, plant_alias: str, view_date: date) -> 
 
 
 def _render_multi_day(
-    svc: LiveDataService,
     plant_uid: str,
     plant_alias: str,
     end_date: date,
@@ -340,8 +374,12 @@ def _render_multi_day(
     days_back = st.slider("Days to compare", 1, 30, 7, key="multi_day_slider")
     start_date = end_date - timedelta(days=days_back)
 
+    device_ids_tuple = tuple(device_ids) if device_ids else None
     try:
-        mdf = svc.get_multi_day_readings(plant_uid, start_date, end_date, device_ids=device_ids)
+        mdf = _cached_get_multi_day_readings(
+            plant_uid, start_date.isoformat(), end_date.isoformat(),
+            device_ids=device_ids_tuple,
+        )
     except Exception as exc:
         logger.exception("Failed to load multi-day readings")
         st.error(f"Could not load multi-day data: {exc}")

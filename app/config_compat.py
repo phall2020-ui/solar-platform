@@ -7,6 +7,7 @@ to work without modification.
 """
 from __future__ import annotations
 
+import functools
 from pathlib import Path
 from typing import Dict
 
@@ -23,6 +24,33 @@ from solar_platform.config import (
     Settings,
     get_settings as _get_settings,
 )
+
+
+@functools.lru_cache(maxsize=1)
+def _compute_css() -> str:
+    """Cached CSS computation — reads theme.css once."""
+    color_vars = {
+        'background': 'ampyr-bg',
+        'surface': 'ampyr-surface',
+        'border': 'ampyr-border',
+        'primary': 'ampyr-primary',
+        'secondary': 'ampyr-secondary',
+        'accent': 'ampyr-accent',
+        'text': 'ampyr-text',
+        'text_secondary': 'ampyr-text-secondary',
+        'positive': 'ampyr-positive',
+        'negative': 'ampyr-negative',
+        'warning': 'ampyr-warning',
+    }
+    props = "\n".join(
+        f"    --{var}: {BRAND_COLORS[key]};"
+        for key, var in color_vars.items()
+        if key in BRAND_COLORS
+    )
+    root_css = f":root {{\n{props}\n}}"
+    css_path = Path(__file__).parent / "styles" / "theme.css"
+    file_css = css_path.read_text(encoding="utf-8")
+    return f"<style>\n{root_css}\n\n{file_css}\n</style>"
 
 
 class UnifiedConfig:
@@ -133,29 +161,8 @@ class UnifiedConfig:
     # ── Helper methods ───────────────────────────────────────────────
     @classmethod
     def get_css(cls) -> str:
-        """Generate custom CSS for AMPYR branding."""
-        color_vars = {
-            'background': 'ampyr-bg',
-            'surface': 'ampyr-surface',
-            'border': 'ampyr-border',
-            'primary': 'ampyr-primary',
-            'secondary': 'ampyr-secondary',
-            'accent': 'ampyr-accent',
-            'text': 'ampyr-text',
-            'text_secondary': 'ampyr-text-secondary',
-            'positive': 'ampyr-positive',
-            'negative': 'ampyr-negative',
-            'warning': 'ampyr-warning',
-        }
-        props = "\n".join(
-            f"    --{var}: {cls.BRAND_COLORS[key]};"
-            for key, var in color_vars.items()
-            if key in cls.BRAND_COLORS
-        )
-        root_css = f":root {{\n{props}\n}}"
-        css_path = Path(__file__).parent / "styles" / "theme.css"
-        file_css = css_path.read_text(encoding="utf-8")
-        return f"<style>\n{root_css}\n\n{file_css}\n</style>"
+        """Generate custom CSS for AMPYR branding (cached)."""
+        return _compute_css()
 
     @classmethod
     def get_page_config(cls) -> Dict:
