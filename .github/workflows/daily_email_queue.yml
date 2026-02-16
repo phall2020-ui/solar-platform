@@ -1,8 +1,7 @@
-name: Monthly Email Queue
+name: Daily Email Queue
 
 on:
   # Trigger automatically after the daily sync completes successfully.
-  # This guarantees the previous-month backfill has run before we generate the monthly summary.
   workflow_run:
     workflows: ["Daily Notion Pull"]
     types: [completed]
@@ -16,25 +15,21 @@ on:
         options:
           - TEST
           - PROD
-      month:
-        description: "Target month (YYYY-MM). Leave blank for previous month."
+      date:
+        description: "Report date (YYYY-MM-DD). Leave blank for previous day."
         required: false
         default: ""
-      top_n:
-        description: "Top N outliers to include"
-        required: false
-        default: "5"
       recipients:
-        description: "Comma-separated recipient emails (optional; falls back to secret MONTHLY_EMAIL_RECIPIENTS)"
+        description: "Comma-separated recipients (optional; falls back to DAILY_EMAIL_RECIPIENTS then MONTHLY_EMAIL_RECIPIENTS)"
         required: false
         default: ""
       overwrite_existing:
-        description: "Overwrite an existing page for that month/run_type if present (true/false)"
+        description: "Overwrite an existing page if present (true/false)"
         required: false
         default: "false"
 
 jobs:
-  queue-monthly-email:
+  queue-daily-email:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     if: >-
@@ -54,48 +49,23 @@ jobs:
       QUEUE_DB_ID: 3061773a-96c0-81cf-a9a0-f9aa521b70ea
 
     steps:
-      - name: Month-close gate
-        id: gate
-        run: |
-          set -euo pipefail
-
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Allow a small retry window at month start in case day-1 run fails.
-          # Script is idempotent for the same month+run type, so repeated runs
-          # in this window are safe.
-          DAY="$(date -u +%d)"
-          GRACE_DAYS="${SYNC_MONTH_CLOSE_GRACE_DAYS:-3}"
-          if [ "$((10#${DAY}))" -le "$((10#${GRACE_DAYS}))" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Not in month-close window (day=${DAY}, grace=${GRACE_DAYS}). Skipping."
-          fi
-
       - name: Checkout code
         uses: actions/checkout@v4
-        if: steps.gate.outputs.run == 'true'
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-        if: steps.gate.outputs.run == 'true'
 
       - name: Install dependencies
-        if: steps.gate.outputs.run == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install requests
 
       - name: Validate required secrets
-        if: steps.gate.outputs.run == 'true'
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          DAILY_EMAIL_RECIPIENTS: ${{ secrets.DAILY_EMAIL_RECIPIENTS }}
           MONTHLY_EMAIL_RECIPIENTS: ${{ secrets.MONTHLY_EMAIL_RECIPIENTS }}
         run: |
           set -euo pipefail
@@ -103,8 +73,8 @@ jobs:
           if [ -z "${NOTION_TOKEN:-}" ]; then
             missing+=("NOTION_TOKEN")
           fi
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ] && [ -z "${MONTHLY_EMAIL_RECIPIENTS:-}" ]; then
-            missing+=("MONTHLY_EMAIL_RECIPIENTS (required for automatic runs)")
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ] && [ -z "${DAILY_EMAIL_RECIPIENTS:-}" ] && [ -z "${MONTHLY_EMAIL_RECIPIENTS:-}" ]; then
+            missing+=("DAILY_EMAIL_RECIPIENTS or MONTHLY_EMAIL_RECIPIENTS (required for automatic runs)")
           fi
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing required secrets: ${missing[*]}"
@@ -112,7 +82,6 @@ jobs:
           fi
 
       - name: Verify Notion DB Access
-        if: steps.gate.outputs.run == 'true'
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
         run: |
@@ -140,50 +109,52 @@ jobs:
           PY
 
       - name: Create/Update Queue Page
-        if: steps.gate.outputs.run == 'true'
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          DAILY_EMAIL_RECIPIENTS: ${{ secrets.DAILY_EMAIL_RECIPIENTS }}
           MONTHLY_EMAIL_RECIPIENTS: ${{ secrets.MONTHLY_EMAIL_RECIPIENTS }}
         run: |
           set -euo pipefail
 
-          # Automatic runs always create the PROD page and set it ready for the downstream sender.
           if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ]; then
             RUN_TYPE="PROD"
-            TOP_N="5"
-            MONTH=""
-            RECIPIENTS="${MONTHLY_EMAIL_RECIPIENTS}"
+            REPORT_DATE=""
+            RECIPIENTS="${DAILY_EMAIL_RECIPIENTS}"
+            if [ -z "${RECIPIENTS}" ]; then
+              RECIPIENTS="${MONTHLY_EMAIL_RECIPIENTS}"
+            fi
             OVERWRITE="false"
           else
             RUN_TYPE="${{ inputs.run_type }}"
-            TOP_N="${{ inputs.top_n }}"
-            MONTH="${{ inputs.month }}"
+            REPORT_DATE="${{ inputs.date }}"
             RECIPIENTS="${{ inputs.recipients }}"
             OVERWRITE="${{ inputs.overwrite_existing }}"
+            if [ -z "${RECIPIENTS}" ]; then
+              RECIPIENTS="${DAILY_EMAIL_RECIPIENTS}"
+            fi
             if [ -z "${RECIPIENTS}" ]; then
               RECIPIENTS="${MONTHLY_EMAIL_RECIPIENTS}"
             fi
           fi
 
           if [ -z "${RECIPIENTS}" ]; then
-            echo "::error::Missing recipients. Provide workflow input 'recipients' or set secret MONTHLY_EMAIL_RECIPIENTS."
+            echo "::error::Missing recipients. Provide workflow input 'recipients' or set secret DAILY_EMAIL_RECIPIENTS/MONTHLY_EMAIL_RECIPIENTS."
             exit 1
           fi
 
           ARGS=(
             --run-type "${RUN_TYPE}"
-            --top-n "${TOP_N}"
             --recipients "${RECIPIENTS}"
             --comparison-db-id "${COMPARISON_DB_ID}"
             --queue-db-id "${QUEUE_DB_ID}"
           )
 
-          if [ -n "${MONTH}" ]; then
-            ARGS+=(--month "${MONTH}")
+          if [ -n "${REPORT_DATE}" ]; then
+            ARGS+=(--date "${REPORT_DATE}")
           fi
 
           if [ "${OVERWRITE}" = "true" ]; then
             ARGS+=(--overwrite-existing)
           fi
 
-          python3 tools/inverter-data-juggle/monthly_email_queue.py "${ARGS[@]}"
+          python3 tools/inverter-data-juggle/daily_email_queue.py "${ARGS[@]}"
