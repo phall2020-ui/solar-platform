@@ -16,6 +16,19 @@ def render() -> None:
     st.markdown("## 📉 Degradation Analysis")
     st.caption("Annualized PR trend estimation from monthly medians.")
 
+    try:
+        _render_body()
+    except Exception as e:
+        if "lock" in str(e).lower():
+            st.warning(
+                "⏳ The database is currently busy (a background job may be running). "
+                "Please try again in a moment."
+            )
+        else:
+            st.error(f"Error rendering Degradation Analysis: {e}")
+
+
+def _render_body() -> None:
     plants = PlantRepository().list_all()
     if plants.empty:
         st.warning("No plants found.")

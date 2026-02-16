@@ -14,6 +14,20 @@ from solar_platform.db.repository import PlantRepository
 
 def render() -> None:
     st.markdown("## 📈 PR Trending")
+
+    try:
+        _render_body()
+    except Exception as e:
+        if "lock" in str(e).lower():
+            st.warning(
+                "⏳ The database is currently busy (a background job may be running). "
+                "Please try again in a moment."
+            )
+        else:
+            st.error(f"Error rendering PR Trending: {e}")
+
+
+def _render_body() -> None:
     plants = PlantRepository().list_all()
     if plants.empty:
         st.warning("No plants found.")

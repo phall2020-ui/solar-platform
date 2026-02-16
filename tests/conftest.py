@@ -150,3 +150,16 @@ def seeded_engine(tmp_db_path):
     )
     conn.close()
     return DuckDBEngine(str(tmp_db_path))
+
+
+# ── Extended suite fixtures (conftest_suite.py) ─────────────────────────
+# Re-export fixtures and hooks so pytest discovers them automatically.
+from tests.conftest_suite import (  # noqa: E402, F401
+    pytest_configure as _suite_configure,
+    _capture_warnings,
+    large_dataframe,
+    mock_streamlit,
+    mock_api_response,
+    mock_duckdb_error,
+    timing,
+)

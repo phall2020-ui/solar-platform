@@ -96,6 +96,19 @@ def render() -> None:
         )
         return
 
+    try:
+        _render_body()
+    except Exception as e:
+        if "lock" in str(e).lower():
+            st.warning(
+                "⏳ The database is currently busy (a background job may be running). "
+                "Please try again in a moment."
+            )
+        else:
+            st.error(f"Error rendering Report Library: {e}")
+
+
+def _render_body() -> None:
     # ── Initialise library ──────────────────────────────────────────────
     library = ReportLibrary()
 

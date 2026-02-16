@@ -311,63 +311,175 @@ def render() -> None:
 
 
 def _load_quality_scores() -> dict[str, float]:
-    if QUALITY_SCORER_AVAILABLE:
+    if QUALITY_SCORER_AVAILABLE and PLANT_REPO_AVAILABLE:
         try:
+            from solar_platform.db.legacy import get_db
+
             scorer = QualityScorer()
-            return scorer.score_portfolio()
+            repo = PlantRepository()
+            plants_df = repo.get_all()
+            db = get_db()
+
+            if plants_df is None or plants_df.empty:
+                return _demo_quality_scores()
+
+            scores: dict[str, float] = {}
+            for _, plant in plants_df.iterrows():
+                alias = plant.get("alias") or plant.get("plant_uid", "unknown")
+                uid = plant.get("plant_uid", alias)
+                try:
+                    df = db.query_readings_df(uid, limit=100)
+                    if df is not None and not df.empty:
+                        plant_config = {"capacity_kw": plant.get("dc_size_kw") or 100}
+                        row_scores = []
+                        for _, row in df.head(50).iterrows():
+                            s = scorer.score_reading(row.to_dict(), plant_config)
+                            row_scores.append(s)
+                        scores[alias] = sum(row_scores) / len(row_scores) / 100.0 if row_scores else 0.0
+                    else:
+                        scores[alias] = 0.0
+                except Exception:
+                    scores[alias] = 0.0
+            if scores:
+                return scores
         except Exception as e:
             logger.warning("QualityScorer failed, using demo data: %s", e)
     return _demo_quality_scores()
 
 
 def _load_completeness_matrix(days: int) -> pd.DataFrame:
-    if QUALITY_SCORER_AVAILABLE:
+    if GAP_DETECTION_AVAILABLE and PLANT_REPO_AVAILABLE:
         try:
-            scorer = QualityScorer()
-            return scorer.completeness_matrix(days=days)
+            from datetime import timezone
+
+            detector = GapDetector()
+            repo = PlantRepository()
+            plants_df = repo.get_all()
+            now = datetime.now(timezone.utc)
+            start = now - timedelta(days=days)
+
+            if plants_df is None or plants_df.empty:
+                return _demo_completeness_matrix(days)
+
+            all_rows: list = []
+            for _, plant in plants_df.iterrows():
+                alias = plant.get("alias") or plant.get("plant_uid", "unknown")
+                uid = plant.get("plant_uid", alias)
+                try:
+                    comp = detector.daily_completeness(uid, start, now)
+                    if comp is not None and not comp.empty:
+                        comp["plant"] = alias
+                        all_rows.append(comp)
+                except Exception:
+                    pass
+            if all_rows:
+                return pd.concat(all_rows, ignore_index=True)
         except Exception as e:
             logger.warning("Completeness matrix failed, using demo: %s", e)
     return _demo_completeness_matrix(days)
 
 
 def _load_validation_failures() -> pd.DataFrame:
-    if VALIDATORS_AVAILABLE:
+    if VALIDATORS_AVAILABLE and PLANT_REPO_AVAILABLE:
         try:
-            report: ValidationReport = run_validation(DEFAULT_VALIDATORS)
-            rows = [{"rule": r.name, "failures": r.failure_count} for r in report.results]
-            return pd.DataFrame(rows).sort_values("failures", ascending=True)
+            from solar_platform.db.legacy import get_db
+
+            repo = PlantRepository()
+            plants_df = repo.get_all()
+            db = get_db()
+
+            if plants_df is None or plants_df.empty:
+                return _demo_validation_failures()
+
+            failure_counts: dict[str, int] = {}
+            for _, plant in plants_df.iterrows():
+                uid = plant.get("plant_uid", "")
+                try:
+                    df = db.query_readings_df(uid, limit=50)
+                    if df is not None and not df.empty:
+                        plant_config = {"capacity_kw": plant.get("dc_size_kw") or 100}
+                        for _, row in df.head(20).iterrows():
+                            report = run_validation(row.to_dict(), plant_config)
+                            for result in report.results:
+                                key = result.name
+                                failure_counts[key] = failure_counts.get(key, 0) + (1 if not result.passed else 0)
+                except Exception:
+                    pass
+            if failure_counts:
+                rows = [{"rule": k, "failures": v} for k, v in failure_counts.items()]
+                return pd.DataFrame(rows).sort_values("failures", ascending=True)
         except Exception as e:
             logger.warning("Validation run failed, using demo: %s", e)
     return _demo_validation_failures()
 
 
 def _load_gaps() -> pd.DataFrame:
-    if GAP_DETECTION_AVAILABLE:
+    if GAP_DETECTION_AVAILABLE and PLANT_REPO_AVAILABLE:
         try:
+            from datetime import timezone
+
             detector = GapDetector()
-            gaps: list[DataGap] = detector.detect_all()
-            rows = [
-                {
-                    "plant": g.plant,
-                    "start": g.start.strftime("%Y-%m-%d %H:%M"),
-                    "end": g.end.strftime("%Y-%m-%d %H:%M"),
-                    "duration_hours": g.duration_hours,
-                    "completeness": f"{g.completeness:.0%}",
-                    "status": g.status,
-                }
-                for g in gaps
-            ]
-            return pd.DataFrame(rows) if rows else pd.DataFrame(columns=["plant", "start", "end", "duration_hours", "completeness", "status"])
+            repo = PlantRepository()
+            plants_df = repo.get_all()
+            now = datetime.now(timezone.utc)
+            start = now - timedelta(days=30)
+
+            if plants_df is None or plants_df.empty:
+                return _demo_gaps()
+
+            all_gaps: list[dict] = []
+            for _, plant in plants_df.iterrows():
+                alias = plant.get("alias") or plant.get("plant_uid", "unknown")
+                uid = plant.get("plant_uid", alias)
+                try:
+                    gaps = detector.detect_gaps(uid, start, now)
+                    for g in gaps:
+                        all_gaps.append({
+                            "plant": alias,
+                            "start": g.start.strftime("%Y-%m-%d %H:%M"),
+                            "end": g.end.strftime("%Y-%m-%d %H:%M"),
+                            "duration_hours": round(g.duration_minutes / 60, 1),
+                            "completeness": "0%",
+                            "status": g.severity.value,
+                        })
+                except Exception:
+                    pass
+            if all_gaps:
+                return pd.DataFrame(all_gaps)
+            return pd.DataFrame(columns=["plant", "start", "end", "duration_hours", "completeness", "status"])
         except Exception as e:
             logger.warning("Gap detection failed, using demo: %s", e)
     return _demo_gaps()
 
 
 def _load_sensor_health() -> dict[str, dict]:
-    if SENSOR_HEALTH_AVAILABLE:
+    if SENSOR_HEALTH_AVAILABLE and PLANT_REPO_AVAILABLE:
         try:
             monitor = SensorHealthMonitor()
-            return monitor.health_report()
+            repo = PlantRepository()
+            plants_df = repo.get_all()
+
+            if plants_df is None or plants_df.empty:
+                return _demo_sensor_health()
+
+            result: dict[str, dict] = {}
+            for _, plant in plants_df.iterrows():
+                alias = plant.get("alias") or plant.get("plant_uid", "unknown")
+                uid = plant.get("plant_uid", alias)
+                try:
+                    health = monitor.compute_health(uid, days=30)
+                    if health:
+                        result[alias] = {
+                            "overall": {
+                                "uptime": health.get("uptime_pct", 0) / 100.0,
+                                "drift": 0.0,
+                                "status": "healthy" if health.get("uptime_pct", 0) > 90 else "degraded",
+                            }
+                        }
+                except Exception:
+                    pass
+            if result:
+                return result
         except Exception as e:
             logger.warning("Sensor health failed, using demo: %s", e)
     return _demo_sensor_health()

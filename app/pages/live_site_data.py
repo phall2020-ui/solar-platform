@@ -301,12 +301,19 @@ def _render_daily_chart(df: pd.DataFrame, plant_alias: str, view_date: date) -> 
     # "Now" line if viewing today
     if view_date == date.today():
         now = datetime.now()
-        fig.add_vline(
-            x=now,
-            line_dash="dot",
-            line_color=AMPYR_TEAL,
-            annotation_text="Now",
-            annotation_position="top right",
+        # Use add_shape directly to avoid Plotly annotation_params_for_line
+        # bug with datetime objects (sum() fails on int + datetime).
+        fig.add_shape(
+            type="line",
+            x0=now, x1=now, y0=0, y1=1,
+            yref="paper",
+            line=dict(dash="dot", color=AMPYR_TEAL, width=1),
+        )
+        fig.add_annotation(
+            x=now, y=1, yref="paper",
+            text="Now", showarrow=False,
+            font=dict(color=AMPYR_TEAL, size=11),
+            yshift=10,
         )
 
     fig.update_layout(

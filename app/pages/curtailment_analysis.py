@@ -81,6 +81,19 @@ def render():
     st.markdown("## \U0001f50c Curtailment Analysis")
     st.caption("Detects export-limitation curtailment events, backed by CurtailmentEngine.")
 
+    try:
+        _render_body()
+    except Exception as e:
+        if "lock" in str(e).lower():
+            st.warning(
+                "⏳ The database is currently busy (a background job may be running). "
+                "Please try again in a moment."
+            )
+        else:
+            st.error(f"Error rendering Curtailment Analysis: {e}")
+
+
+def _render_body():
     # --- Controls -----------------------------------------------------------
     col_plant, col_dates = st.columns([2, 1])
 

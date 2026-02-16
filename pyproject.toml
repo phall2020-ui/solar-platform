@@ -86,4 +86,6 @@ python_files = "test_*.py"
 markers = [
     "integration: Integration tests against real DuckDB",
     "e2e: End-to-end tests covering full workflows",
+    "performance: Performance and speed benchmarks",
+    "compile: Compilation and import verification tests",
 ]

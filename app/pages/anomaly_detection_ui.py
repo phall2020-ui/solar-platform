@@ -291,39 +291,108 @@ def _get_plant_list() -> list[str]:
 def _load_anomalies(plant: str, days: int, method: str, min_confidence: float) -> pd.DataFrame:
     if ANOMALY_SERVICE_AVAILABLE:
         try:
+            from datetime import date as _date
+            from solar_platform.db.legacy import get_db
+
             svc = AnomalyService()
-            anomalies: list[Anomaly] = svc.detect(
-                plant=plant,
-                days=days,
-                method=method if method != "All" else None,
-                min_confidence=min_confidence,
-            )
-            if anomalies:
-                rows = [
-                    {
-                        "plant": a.plant,
-                        "timestamp": a.timestamp,
-                        "type": a.anomaly_type.value if hasattr(a.anomaly_type, "value") else str(a.anomaly_type),
-                        "confidence": a.confidence,
-                        "metric": a.metric,
-                        "expected": a.expected,
-                        "actual": a.actual,
-                        "deviation_pct": a.deviation_pct,
-                        "description": a.description,
-                    }
-                    for a in anomalies
-                ]
-                return pd.DataFrame(rows)
+
+            # Resolve plant alias → plant_uid
+            plant_uid = plant
+            if PLANT_REPO_AVAILABLE:
+                try:
+                    repo = PlantRepository()
+                    p = repo.get_by_alias(plant)
+                    if p:
+                        plant_uid = p["plant_uid"]
+                except Exception:
+                    pass
+
+            # Fetch readings for the date range
+            db = get_db()
+            end = _date.today()
+            start = end - timedelta(days=days)
+            df = db.query_readings_df(plant_uid, start_date=start.isoformat(), end_date=end.isoformat())
+
+            if df is not None and not df.empty:
+                # Rename columns to match what the anomaly detectors expect
+                col_renames = {
+                    "activePower_value": "generation_kwh",
+                    "poaIrradiance_value": "irradiance",
+                }
+                df = df.rename(columns={k: v for k, v in col_renames.items() if k in df.columns})
+
+                anomalies: list[Anomaly] = svc.detect(df, plant_uid)
+
+                # Filter by method if specified
+                if method and method != "All":
+                    method_lower = method.lower().replace(" ", "_")
+                    anomalies = [a for a in anomalies if method_lower in a.anomaly_type.value]
+
+                if anomalies:
+                    rows = [
+                        {
+                            "plant": a.plant_uid,
+                            "timestamp": a.timestamp,
+                            "type": a.anomaly_type.value if hasattr(a.anomaly_type, "value") else str(a.anomaly_type),
+                            "confidence": min(abs(a.z_score or 0) / 5.0, 1.0) if a.z_score else 0.8,
+                            "metric": a.metric,
+                            "expected": a.expected_value or 0.0,
+                            "actual": a.value,
+                            "deviation_pct": (
+                                ((a.value - (a.expected_value or 0)) / (a.expected_value or 1)) * 100
+                                if a.expected_value
+                                else 0.0
+                            ),
+                            "description": a.description,
+                        }
+                        for a in anomalies
+                    ]
+                    result_df = pd.DataFrame(rows)
+                    # Filter by min confidence
+                    result_df = result_df[result_df["confidence"] >= min_confidence]
+                    if not result_df.empty:
+                        return result_df
         except Exception as e:
             logger.warning("AnomalyService failed, using demo: %s", e)
     return _demo_anomalies(plant, days, method, min_confidence)
 
 
 def _load_timeseries(plant: str, days: int) -> pd.DataFrame:
+    """Load power/irradiance timeseries from the database for anomaly overlay."""
     if ANOMALY_SERVICE_AVAILABLE:
         try:
-            svc = AnomalyService()
-            return svc.timeseries(plant=plant, days=days)
+            from datetime import date as _date
+            from solar_platform.db.legacy import get_db
+
+            # Resolve plant alias → plant_uid
+            plant_uid = plant
+            if PLANT_REPO_AVAILABLE:
+                try:
+                    repo = PlantRepository()
+                    p = repo.get_by_alias(plant)
+                    if p:
+                        plant_uid = p["plant_uid"]
+                except Exception:
+                    pass
+
+            db = get_db()
+            end = _date.today()
+            start = end - timedelta(days=days)
+            df = db.query_readings_df(plant_uid, start_date=start.isoformat(), end_date=end.isoformat())
+
+            if df is not None and not df.empty:
+                result = pd.DataFrame()
+                result["timestamp"] = pd.to_datetime(df["ts"], utc=True, errors="coerce")
+                result["power_kw"] = pd.to_numeric(
+                    df.get("activePower_value", pd.Series(dtype="float64")), errors="coerce"
+                ).fillna(0)
+                result["irradiance"] = pd.to_numeric(
+                    df.get("poaIrradiance_value", pd.Series(dtype="float64")), errors="coerce"
+                ).fillna(0)
+                result["is_anomaly"] = False
+                result = result.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+                if not result.empty:
+                    return result
         except Exception:
             pass
     return _demo_metric_timeseries(plant, days)

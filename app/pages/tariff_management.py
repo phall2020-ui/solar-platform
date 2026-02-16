@@ -159,9 +159,28 @@ def _load_current_tariff(plant: str) -> dict:
     if TARIFF_AVAILABLE:
         try:
             mgr = TariffManager()
-            return mgr.get_current(plant)
+            # Resolve alias → plant_uid
+            plant_uid = plant
+            if PLANT_REPO_AVAILABLE:
+                try:
+                    repo = PlantRepository()
+                    p = repo.get_by_alias(plant)
+                    if p:
+                        plant_uid = p["plant_uid"]
+                except Exception:
+                    pass
+
+            result = mgr.get_tariff(plant_uid)
+            if result:
+                return {
+                    "tariff_type": result.get("tariff_type", "—"),
+                    "rate_per_mwh": result.get("rate", 0.0),
+                    "start_date": str(result.get("start_date", "—")),
+                    "end_date": str(result.get("end_date", "—")),
+                    "escalation_pct": result.get("escalation_pct", 0.0),
+                }
         except Exception as e:
-            logger.warning("TariffManager.get_current failed: %s", e)
+            logger.warning("TariffManager.get_tariff failed: %s", e)
     return _demo_current_tariff(plant)
 
 
@@ -169,11 +188,37 @@ def _load_tariff_history(plant: str) -> pd.DataFrame:
     if TARIFF_AVAILABLE:
         try:
             mgr = TariffManager()
-            history = mgr.history(plant)
-            if isinstance(history, pd.DataFrame):
-                return history
-            # Assume list of dicts
-            return pd.DataFrame(history)
+            # Resolve alias → plant_uid
+            plant_uid = plant
+            if PLANT_REPO_AVAILABLE:
+                try:
+                    repo = PlantRepository()
+                    p = repo.get_by_alias(plant)
+                    if p:
+                        plant_uid = p["plant_uid"]
+                except Exception:
+                    pass
+
+            # Query tariff history directly from the engine
+            if mgr.engine.table_exists("plant_tariffs"):
+                rows = mgr.engine.execute(
+                    "SELECT tariff_type, rate, start_date, end_date, escalation_pct "
+                    "FROM plant_tariffs WHERE plant_uid = ? ORDER BY start_date DESC",
+                    (plant_uid,),
+                )
+                if rows:
+                    history = []
+                    for row in rows:
+                        end_d = row[3]
+                        history.append({
+                            "tariff_type": row[0],
+                            "rate_per_mwh": float(row[1]),
+                            "start_date": str(row[2]),
+                            "end_date": str(end_d) if end_d else "—",
+                            "escalation_pct": float(row[4]) if row[4] else 0.0,
+                            "status": "Active" if (end_d is None or end_d >= date.today()) else "Expired",
+                        })
+                    return pd.DataFrame(history)
         except Exception as e:
             logger.warning("TariffManager.history failed: %s", e)
     return _demo_tariff_history(plant)

@@ -79,10 +79,10 @@ class ReadingsRepository(BaseRepository):
         params: list[Any] = [plant_uid]
 
         if start is not None:
-            conditions.append(f"{time_column} >= ?")
+            conditions.append(f"CAST({time_column} AS TIMESTAMP) >= ?")
             params.append(start)
         if end is not None:
-            conditions.append(f"{time_column} <= ?")
+            conditions.append(f"CAST({time_column} AS TIMESTAMP) <= ?")
             params.append(end)
         if device_id:
             conditions.append(f"{device_column} = ?")

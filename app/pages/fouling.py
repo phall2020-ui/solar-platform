@@ -18,6 +18,19 @@ def render() -> None:
     st.markdown("## 🧹 Fouling Analysis")
     st.caption("Daily soiling trend – baseline vs current normalised ratio.")
 
+    try:
+        _render_body()
+    except Exception as e:
+        if "lock" in str(e).lower():
+            st.warning(
+                "⏳ The database is currently busy (a background job may be running). "
+                "Please try again in a moment."
+            )
+        else:
+            st.error(f"Error rendering Fouling Analysis: {e}")
+
+
+def _render_body() -> None:
     # ── Plant selection ──────────────────────────────────────────────
     plants = PlantRepository().list_all()
     if plants.empty:

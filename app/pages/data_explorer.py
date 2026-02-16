@@ -37,7 +37,20 @@ def render():
     """Render the Data Explorer page."""
     st.title("🔍 Data Explorer")
     st.markdown("Advanced data operations with background jobs, validation, and caching")
-    
+
+    try:
+        _render_body()
+    except Exception as e:
+        if "lock" in str(e).lower():
+            st.warning(
+                "⏳ The database is currently busy (a background job may be running). "
+                "Please try again in a moment."
+            )
+        else:
+            st.error(f"Error rendering Data Explorer: {e}")
+
+
+def _render_body():
     # Check for job completions
     check_job_completion()
     
