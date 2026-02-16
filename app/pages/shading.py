@@ -28,7 +28,7 @@ def _cached_shading(plant_uid: str, start_iso: str, end_iso: str):
 def render() -> None:
     """Render the Shading Analysis page."""
     st.markdown("## 🌤️ Shading Analysis")
-    st.caption("Hourly normalised performance profile – shoulder vs midday ratio.")
+    st.caption("Seasonal or hourly normalised performance profile – detecting shading impacts.")
 
     try:
         _render_body()
@@ -76,16 +76,29 @@ def _render_body() -> None:
 
     # ── KPI metrics ──────────────────────────────────────────────────
     s = result.summary
-    k1, k2, k3 = st.columns(3)
+    mode = s.get("mode", "single_period")
+
+    k1, k2, k3, k4 = st.columns(4)
     k1.metric("Shading Ratio", f"{s.get('shading_ratio', 0):.3f}")
     k2.metric("Estimated Loss", f"{s.get('estimated_shading_loss_pct', 0):.1f} %")
-    k3.metric("Hourly Data Points", s.get("hourly_points", 0))
+    if mode == "seasonal_baseline":
+        k3.metric("Summer Hours", s.get("summer_hours", 0))
+        k4.metric("Winter Hours", s.get("winter_hours", 0))
+    else:
+        k3.metric("Hourly Data Points", s.get("hourly_points", 0))
+        k4.metric("Mode", "Single Period")
 
     add_to_report_button(
-        content={"Shading Ratio": s.get("shading_ratio"), "Loss %": s.get("estimated_shading_loss_pct")},
+        content={
+            "Mode": mode,
+            "Shading Ratio": s.get("shading_ratio"),
+            "Loss %": s.get("estimated_shading_loss_pct"),
+            "Summer Hours": s.get("summer_hours"),
+            "Winter Hours": s.get("winter_hours"),
+        },
         title=f"Shading KPIs – {name}",
         item_type="kpi",
-        description="Shoulder-to-midday shading ratio and estimated loss",
+        description="Shading ratio and estimated loss from seasonal or hourly analysis",
         source_page="Shading",
         button_key=f"shading_kpi_{name}".replace(" ", "_"),
     )
@@ -95,20 +108,38 @@ def _render_body() -> None:
             for w in result.warnings:
                 st.caption(f"⚠ {w}")
 
-    # ── Hourly profile bar chart ─────────────────────────────────────
+    # ── Hourly profile chart ────────────────────────────────────────
     hourly = result.table
     if hourly is not None and not hourly.empty:
-        fig = px.bar(
-            hourly,
-            x="hour",
-            y="norm_ratio",
-            labels={"hour": "Hour of Day", "norm_ratio": "Normalised Ratio"},
-        )
-        fig.update_traces(marker_color=[
-            "#c62828" if v < 0.85 else ("#ff8f00" if v < 0.95 else "#2e7d32")
-            for v in hourly["norm_ratio"]
-        ])
-        apply_analysis_template(fig, title="Hourly Normalised Performance Profile")
+        fig = go.Figure()
+
+        if mode == "seasonal_baseline" and "baseline_ratio" in hourly.columns:
+            # Seasonal: overlay summer baseline vs winter comparison
+            fig.add_trace(go.Bar(
+                x=hourly["hour"], y=hourly.get("baseline_ratio", []),
+                name="Summer Baseline", marker_color="#2e7d32", opacity=0.6,
+            ))
+            fig.add_trace(go.Bar(
+                x=hourly["hour"], y=hourly.get("compare_ratio", []),
+                name="Winter Comparison", marker_color="#c62828", opacity=0.6,
+            ))
+            fig.update_layout(barmode="group")
+            apply_analysis_template(fig, title="Seasonal Shading Profile – Summer vs Winter")
+        else:
+            # Single period: colour-coded bar chart
+            ratio_col = "norm_ratio" if "norm_ratio" in hourly.columns else "compare_ratio"
+            if ratio_col in hourly.columns:
+                fig.add_trace(go.Bar(
+                    x=hourly["hour"], y=hourly[ratio_col],
+                    marker_color=[
+                        "#c62828" if v < 0.85 else ("#ff8f00" if v < 0.95 else "#2e7d32")
+                        for v in hourly[ratio_col]
+                    ],
+                ))
+            apply_analysis_template(fig, title="Hourly Normalised Performance Profile")
+
+        fig.update_yaxes(title_text="Normalised Ratio")
+        fig.update_xaxes(title_text="Hour of Day")
         st.plotly_chart(fig, use_container_width=True)
 
         add_to_report_button(
@@ -137,5 +168,13 @@ def _render_body() -> None:
                 source_page="Shading",
                 button_key=f"shading_table_{name}".replace(" ", "_"),
             )
+
+    # ── Per-device breakdown ─────────────────────────────────────────
+    per_device = s.get("per_device")
+    if per_device:
+        with st.expander("Per-Device Breakdown"):
+            import pandas as pd
+            dev_df = pd.DataFrame(per_device)
+            st.dataframe(dev_df, use_container_width=True, hide_index=True)
 
     st.caption(f"Calculation took {result.calculation_seconds:.2f} s")

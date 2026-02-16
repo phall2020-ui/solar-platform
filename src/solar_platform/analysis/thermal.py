@@ -9,7 +9,13 @@ from typing import Any
 import pandas as pd
 
 from solar_platform.analysis.base import AnalysisEngine, AnalysisResult
-from solar_platform.analysis.helpers import coerce_datetime, date_bounds_or_default, detect_time_column, find_numeric_column
+from solar_platform.analysis.helpers import (
+    TEMPERATURE_KEYWORDS,
+    coerce_datetime,
+    date_bounds_or_default,
+    detect_time_column,
+    find_numeric_column,
+)
 from solar_platform.db.engine import DatabaseEngine
 from solar_platform.db.repository import ReadingsRepository
 
@@ -34,7 +40,7 @@ class ThermalLossEngine(AnalysisEngine):
             return AnalysisResult(self.analysis_type, plant_uid, start, end, warnings=["No readings available."])
 
         ts_col = detect_time_column(df)
-        module_col = find_numeric_column(df, ["moduletemperature", "module_temp", "cell_temp"])
+        module_col = find_numeric_column(df, TEMPERATURE_KEYWORDS)
         ambient_col = find_numeric_column(df, ["ambienttemperature", "ambient_temp", "air_temp"])
 
         if not ts_col or not module_col or not ambient_col:

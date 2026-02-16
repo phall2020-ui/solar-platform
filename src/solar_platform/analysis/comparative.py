@@ -6,15 +6,19 @@ import time
 from datetime import datetime
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from solar_platform.analysis.base import AnalysisEngine, AnalysisResult
 from solar_platform.analysis.helpers import (
+    IRRADIANCE_KEYWORDS,
+    POWER_KEYWORDS,
     coerce_datetime,
     date_bounds_or_default,
     detect_time_column,
     estimate_energy_kwh,
     find_numeric_column,
+    merge_power_and_irradiance,
 )
 from solar_platform.db.engine import DatabaseEngine
 from solar_platform.db.repository import PlantRepository, ReadingsRepository
@@ -75,7 +79,10 @@ class ComparativeEngine(AnalysisEngine):
                 continue
             df = coerce_datetime(df, ts_col)
 
-            power_col = find_numeric_column(df, ["activepower", "power", "pac", "p_grid", "kw"])
+            # Merge weather irradiance onto inverter rows
+            df = merge_power_and_irradiance(df, ts_col)
+
+            power_col = find_numeric_column(df, POWER_KEYWORDS)
             pr_col = find_numeric_column(df, ["performance_ratio", "pr"])
             availability_col = find_numeric_column(df, ["availability"])
 
@@ -88,10 +95,26 @@ class ComparativeEngine(AnalysisEngine):
 
             clipping_loss_pct = 0.0
             if power_col:
+                irr_col = find_numeric_column(df, IRRADIANCE_KEYWORDS)
                 p = pd.to_numeric(df[power_col], errors="coerce")
                 threshold = float(p.quantile(0.98))
-                clipped_share = float((p >= threshold).mean())
-                clipping_loss_pct = clipped_share * 4.0
+                clipped = p >= threshold
+                if irr_col is not None:
+                    irr = pd.to_numeric(df[irr_col], errors="coerce")
+                    mask = clipped & irr.notna() & (irr > 0)
+                    if mask.any():
+                        # Fit linear model on unclipped data to estimate expected power
+                        unclipped = (~clipped) & irr.notna() & (irr > 50) & p.notna()
+                        if unclipped.sum() > 10:
+                            coeffs = np.polyfit(irr[unclipped], p[unclipped], 1)
+                            expected = np.polyval(coeffs, irr[mask])
+                            actual = p[mask].values
+                            loss = np.clip(expected - actual, 0, None).sum()
+                            total = p.dropna().sum() + loss
+                            clipping_loss_pct = float(loss / total * 100) if total > 0 else 0.0
+                else:
+                    clipped_share = float(clipped.mean())
+                    clipping_loss_pct = clipped_share * 2.0  # rough estimate without irradiance
 
             summaries.append(
                 {

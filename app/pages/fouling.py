@@ -78,20 +78,33 @@ def _render_body() -> None:
     s = result.summary
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Days Analysed", s.get("days_analyzed", 0))
-    k2.metric("Baseline Ratio", f"{s.get('baseline_ratio', 0):.4f}")
-    k3.metric("Current Ratio", f"{s.get('current_ratio', 0):.4f}")
+    classification = s.get("classification", "—")
+    k2.metric("Classification", classification)
+    k3.metric("Fouling Index", f"{s.get('fouling_index', 0):.2%}")
     k4.metric("Estimated Loss", f"{s.get('estimated_fouling_loss_pct', 0):.1f} %")
+
+    # Second row of KPIs
+    k5, k6, k7, k8 = st.columns(4)
+    k5.metric("Baseline Ratio", f"{s.get('baseline_ratio', 0):.4f}")
+    k6.metric("Current Ratio", f"{s.get('current_ratio', 0):.4f}")
+    energy_loss = s.get("energy_loss_kwh", 0)
+    k7.metric("Energy Loss", f"{energy_loss:.1f} kWh" if energy_loss else "—")
+    k8.metric("Cleaning Events", s.get("cleaning_events_detected", 0))
 
     add_to_report_button(
         content={
             "Days Analysed": s.get("days_analyzed"),
+            "Classification": s.get("classification"),
+            "Fouling Index": s.get("fouling_index"),
             "Baseline Ratio": s.get("baseline_ratio"),
             "Current Ratio": s.get("current_ratio"),
             "Loss %": s.get("estimated_fouling_loss_pct"),
+            "Energy Loss kWh": s.get("energy_loss_kwh"),
+            "Cleaning Events": s.get("cleaning_events_detected"),
         },
         title=f"Fouling KPIs – {name}",
         item_type="kpi",
-        description="Baseline vs current soiling ratio and estimated loss",
+        description="Soiling classification with POA-matched baseline analysis",
         source_page="Fouling",
         button_key=f"fouling_kpi_{name}".replace(" ", "_"),
     )

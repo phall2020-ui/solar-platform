@@ -10,10 +10,13 @@ import pandas as pd
 
 from solar_platform.analysis.base import AnalysisEngine, AnalysisResult
 from solar_platform.analysis.helpers import (
+    IRRADIANCE_KEYWORDS,
+    POWER_KEYWORDS,
     coerce_datetime,
     date_bounds_or_default,
     detect_time_column,
     find_numeric_column,
+    merge_power_and_irradiance,
     normalized_ratio,
 )
 from solar_platform.db.engine import DatabaseEngine
@@ -40,9 +43,12 @@ class PRTrendingEngine(AnalysisEngine):
             return AnalysisResult(self.analysis_type, plant_uid, start, end, warnings=["No readings available."])
 
         ts_col = detect_time_column(df)
+        # Merge weather irradiance onto inverter rows
+        df = merge_power_and_irradiance(df, ts_col)
+
         pr_col = find_numeric_column(df, ["performance_ratio", "pr"])
-        power_col = find_numeric_column(df, ["activepower", "power", "pac", "kw"])
-        irr_col = find_numeric_column(df, ["poa", "irradiance", "gti", "ghi"])
+        power_col = find_numeric_column(df, POWER_KEYWORDS)
+        irr_col = find_numeric_column(df, IRRADIANCE_KEYWORDS)
 
         if not ts_col:
             return AnalysisResult(self.analysis_type, plant_uid, start, end, warnings=["Timestamp column missing."])
