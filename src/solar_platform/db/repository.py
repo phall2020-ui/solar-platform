@@ -6,6 +6,7 @@ All data access should go through repository classes that extend BaseRepository.
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from typing import Any
 
 import pandas as pd
@@ -95,7 +96,10 @@ class ReadingsRepository(BaseRepository):
             sql += " LIMIT ?"
             params.append(limit)
 
-        return self.engine.execute_df(sql, tuple(params))
+        df = self.engine.execute_df(sql, tuple(params))
+        if df.empty or "payload" not in df.columns:
+            return df
+        return self._expand_payload_columns(df)
 
     def get_readings_df(
         self,
@@ -113,6 +117,47 @@ class ReadingsRepository(BaseRepository):
         if not available_columns:
             return df.iloc[0:0].copy()
         return df.loc[:, available_columns].copy()
+
+    @staticmethod
+    def _expand_payload_columns(df: pd.DataFrame) -> pd.DataFrame:
+        payload_records: list[dict[str, Any]] = []
+        for raw in df["payload"]:
+            if raw is None:
+                payload_records.append({})
+                continue
+            try:
+                payload = json.loads(raw) if isinstance(raw, str) else raw
+                if not isinstance(payload, dict):
+                    payload_records.append({})
+                    continue
+                flat: dict[str, Any] = {}
+                for key, value in payload.items():
+                    if isinstance(value, dict):
+                        for sub_key, sub_val in value.items():
+                            flat[f"{key}_{sub_key}"] = sub_val
+                    else:
+                        flat[key] = value
+                payload_records.append(flat)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                payload_records.append({})
+
+        if not payload_records:
+            return df
+
+        payload_df = pd.DataFrame(payload_records)
+        if payload_df.empty:
+            return df
+
+        for col in payload_df.columns:
+            if col in df.columns:
+                base = df[col]
+                if not pd.api.types.is_numeric_dtype(base):
+                    continue
+                df[col] = base.where(base.notna(), pd.to_numeric(payload_df[col], errors="coerce"))
+                continue
+            df[col] = payload_df[col]
+
+        return df
 
     def _resolve_column(self, table_name: str, candidates: list[str]) -> str:
         with self.engine.connection(read_only=True) as conn:
