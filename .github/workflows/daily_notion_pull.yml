@@ -6,6 +6,8 @@ on:
     # then gate to exactly 04:00 Europe/London to handle DST.
     - cron: '0 3 * * *'
     - cron: '0 4 * * *'
+    # Test schedule - runs every 15 minutes for testing (remove after verification)
+    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -25,9 +27,6 @@ jobs:
   sync-data:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    defaults:
-      run:
-        working-directory: tools/inverter-data-juggle
     env:
       # Target Notion database for the daily meter/inverter comparison rows.
       # Source: https://www.notion.so/3041773a96c08150b90ed65a266ee6a7
@@ -40,9 +39,18 @@ jobs:
         run: |
           set -euo pipefail
           UK_HOUR="$(TZ=Europe/London date +%H)"
-          if [ "${UK_HOUR}" = "04" ]; then
+          
+          # TEMPORARY: For testing, runs at */15 are allowed to bypass the 4am gate
+          # TODO: Remove this logic after successful verification and revert to simple 04:00 check
+          # Production runs: only proceed at exactly 04:00 London time
+          UK_MINUTE="$(TZ=Europe/London date +%M)"
+          if [ "$((UK_MINUTE % 15))" -eq 0 ] || [ "${UK_HOUR}" = "04" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "Proceeding: UK local time is 04:00."
+            if [ "$((UK_MINUTE % 15))" -eq 0 ] && [ "${UK_HOUR}" != "04" ]; then
+              echo "Proceeding: Test run (every 15 minutes)."
+            else
+              echo "Proceeding: UK local time is 04:00."
+            fi
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "Skipping: UK local time is ${UK_HOUR}:00 (not 04:00)."
@@ -60,12 +68,14 @@ jobs:
 
       - name: Install dependencies
         if: github.event_name != 'schedule' || steps.uk4_gate.outputs.run == 'true'
+        working-directory: tools/inverter-data-juggle
         run: |
           python -m pip install --upgrade pip
-          pip install requests pandas
+          pip install -r requirements.txt
 
       - name: Validate required secrets
         if: github.event_name != 'schedule' || steps.uk4_gate.outputs.run == 'true'
+        working-directory: tools/inverter-data-juggle
         env:
           JUGGLE_API_KEY: ${{ secrets.JUGGLE_API_KEY }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
@@ -84,6 +94,7 @@ jobs:
 
       - name: Verify Notion DB Access
         if: github.event_name != 'schedule' || steps.uk4_gate.outputs.run == 'true'
+        working-directory: tools/inverter-data-juggle
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
         run: |
@@ -111,6 +122,7 @@ jobs:
 
       - name: Run Notion Sync
         if: github.event_name != 'schedule' || steps.uk4_gate.outputs.run == 'true'
+        working-directory: tools/inverter-data-juggle
         env:
           JUGGLE_API_KEY: ${{ secrets.JUGGLE_API_KEY }}
           SOLIS_API_URL: ${{ secrets.SOLIS_API_URL }}
