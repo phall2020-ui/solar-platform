@@ -40,7 +40,8 @@ jobs:
           set -euo pipefail
           UK_HOUR="$(TZ=Europe/London date +%H)"
           
-          # For testing: runs at */15 are allowed to bypass the 4am gate
+          # TEMPORARY: For testing, runs at */15 are allowed to bypass the 4am gate
+          # TODO: Remove this logic after successful verification and revert to simple 04:00 check
           # Production runs: only proceed at exactly 04:00 London time
           UK_MINUTE="$(TZ=Europe/London date +%M)"
           if [ "$((UK_MINUTE % 15))" -eq 0 ] || [ "${UK_HOUR}" = "04" ]; then
