@@ -33,10 +33,17 @@ on:
         required: false
         default: "false"
 
+concurrency:
+  group: monthly-email-queue
+  cancel-in-progress: true
+
 jobs:
   queue-monthly-email:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Auto-triggers only fire when the parent ran from its cron schedule on
+    # the main branch.  Manual dispatches of Daily Notion Pull won't cascade
+    # here (use this workflow's own workflow_dispatch to queue manually).
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (

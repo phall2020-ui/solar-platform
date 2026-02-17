@@ -6,8 +6,6 @@ on:
     # then gate to exactly 04:00 Europe/London to handle DST.
     - cron: '0 3 * * *'
     - cron: '0 4 * * *'
-    # Test schedule - runs every 15 minutes for testing (remove after verification)
-    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -24,58 +22,65 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ── Gate job ────────────────────────────────────────────────────
+  # For scheduled runs only one of the two UTC crons will match
+  # UK 04:00 (the other fires during DST).  When the gate fails
+  # the downstream sync-data job is *skipped*, so its conclusion
+  # is never "success" and workflow_run listeners won't trigger.
+  uk-time-gate:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule' || true
+    outputs:
+      should_run: ${{ steps.gate.outputs.run }}
+    steps:
+      - name: UK 4am gate (DST-aware)
+        id: gate
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" != "schedule" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Non-schedule trigger — proceeding."
+            exit 0
+          fi
+          UK_HOUR="$(TZ=Europe/London date +%H)"
+          if [ "${UK_HOUR}" = "04" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Proceeding: UK local time is 04:00."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping: UK local time is ${UK_HOUR}:00 (not 04:00)."
+            exit 1
+          fi
+
+  # ── Main sync job ──────────────────────────────────────────────
   sync-data:
+    needs: uk-time-gate
+    if: needs.uk-time-gate.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: tools/inverter-data-juggle
     env:
       # Target Notion database for the daily meter/inverter comparison rows.
       # Source: https://www.notion.so/3041773a96c08150b90ed65a266ee6a7
       NOTION_DB_ID: 3041773a-96c0-8150-b90e-d65a266ee6a7
 
     steps:
-      - name: UK 4am gate (DST-aware)
-        if: github.event_name == 'schedule'
-        id: uk4_gate
-        run: |
-          set -euo pipefail
-          UK_HOUR="$(TZ=Europe/London date +%H)"
-          
-          # TEMPORARY: For testing, runs at */15 are allowed to bypass the 4am gate
-          # TODO: Remove this logic after successful verification and revert to simple 04:00 check
-          # Production runs: only proceed at exactly 04:00 London time
-          UK_MINUTE="$(TZ=Europe/London date +%M)"
-          if [ "$((UK_MINUTE % 15))" -eq 0 ] || [ "${UK_HOUR}" = "04" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            if [ "$((UK_MINUTE % 15))" -eq 0 ] && [ "${UK_HOUR}" != "04" ]; then
-              echo "Proceeding: Test run (every 15 minutes)."
-            else
-              echo "Proceeding: UK local time is 04:00."
-            fi
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping: UK local time is ${UK_HOUR}:00 (not 04:00)."
-          fi
-
       - name: Checkout code
-        if: github.event_name != 'schedule' || steps.uk4_gate.outputs.run == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Python
-        if: github.event_name != 'schedule' || steps.uk4_gate.outputs.run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
-        if: github.event_name != 'schedule' || steps.uk4_gate.outputs.run == 'true'
-        working-directory: tools/inverter-data-juggle
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Validate required secrets
-        if: github.event_name != 'schedule' || steps.uk4_gate.outputs.run == 'true'
-        working-directory: tools/inverter-data-juggle
         env:
           JUGGLE_API_KEY: ${{ secrets.JUGGLE_API_KEY }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
@@ -93,8 +98,6 @@ jobs:
           fi
 
       - name: Verify Notion DB Access
-        if: github.event_name != 'schedule' || steps.uk4_gate.outputs.run == 'true'
-        working-directory: tools/inverter-data-juggle
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
         run: |
@@ -121,8 +124,6 @@ jobs:
           PY
 
       - name: Run Notion Sync
-        if: github.event_name != 'schedule' || steps.uk4_gate.outputs.run == 'true'
-        working-directory: tools/inverter-data-juggle
         env:
           JUGGLE_API_KEY: ${{ secrets.JUGGLE_API_KEY }}
           SOLIS_API_URL: ${{ secrets.SOLIS_API_URL }}
@@ -164,7 +165,7 @@ jobs:
           fi
 
       - name: Upload sync snapshots
-        if: always() && (github.event_name != 'schedule' || steps.uk4_gate.outputs.run == 'true')
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: notion-sync-snapshots

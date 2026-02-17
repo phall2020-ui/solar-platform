@@ -276,6 +276,49 @@ def build_email_subject(run_type: str, month_start: date) -> str:
     return base
 
 
+def _table_html(
+    rows: List[Tuple[str, float, float, float, float, str]],
+) -> str:
+    """Build a professionally styled HTML table for email rendering."""
+    parts: List[str] = []
+    parts.append(
+        '<table style="border-collapse:collapse;width:100%;font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:12px 0;">'
+    )
+    parts.append("<thead>")
+    parts.append(
+        '<tr style="background-color:#1a3a5c;color:#ffffff;text-align:left;">'
+    )
+    for hdr in ("Site", "Juggle Meter (kWh)", "Juggle Inverter (kWh)",
+                "Inverter Portal (kWh)", "% Diff (Inv vs Meter)"):
+        parts.append(
+            f'<th style="padding:8px 10px;border:1px solid #dfe3e8;font-weight:600;">{hdr}</th>'
+        )
+    parts.append("</tr></thead><tbody>")
+    for idx, (site, meter_kwh, inv_kwh, portal_kwh, diff_frac, url) in enumerate(rows):
+        bg = "#f8f9fb" if idx % 2 == 0 else "#ffffff"
+        site_cell = (
+            f'<a href="{url}" style="color:#2563eb;text-decoration:none;">{site}</a>'
+            if url else site
+        )
+        portal_cell = f"{portal_kwh:,.1f}" if portal_kwh > 0 else "\u2014"
+        if meter_kwh > 0 and inv_kwh > 0:
+            pct = diff_frac * 100.0
+            colour = "#dc2626" if abs(pct) > 5.0 else ("#f59e0b" if abs(pct) > 2.0 else "#16a34a")
+            diff_cell = f'<span style="color:{colour};font-weight:600;">{pct:+.1f}%</span>'
+        else:
+            diff_cell = "\u2014"
+        td = f'style="padding:7px 10px;border:1px solid #e5e7eb;background:{bg};"'
+        parts.append("<tr>")
+        parts.append(f"<td {td}>{site_cell}</td>")
+        parts.append(f'<td {td} style="padding:7px 10px;border:1px solid #e5e7eb;background:{bg};text-align:right;">{meter_kwh:,.1f}</td>')
+        parts.append(f'<td {td} style="padding:7px 10px;border:1px solid #e5e7eb;background:{bg};text-align:right;">{inv_kwh:,.1f}</td>')
+        parts.append(f'<td {td} style="padding:7px 10px;border:1px solid #e5e7eb;background:{bg};text-align:right;">{portal_cell}</td>')
+        parts.append(f'<td {td} style="padding:7px 10px;border:1px solid #e5e7eb;background:{bg};text-align:center;">{diff_cell}</td>')
+        parts.append("</tr>")
+    parts.append("</tbody></table>")
+    return "".join(parts)
+
+
 def build_email_body(
     run_type: str,
     month_start: date,
@@ -290,65 +333,88 @@ def build_email_body(
     omitted_no_data_sites: int = 0,
 ) -> str:
     """
-    Body is stored as a rich_text string; downstream automation can treat it as HTML.
-    We use <br> separators (not \\n) to match existing content patterns.
+    Build a professionally formatted HTML email body.
 
-    top_outliers: list of (site_name, diff_frac, link_url)
-    site_rows: list of (site_name, meter_kwh, inv_kwh, portal_kwh, diff_frac, notion_url)
+    Body is stored as rich_text in Notion; downstream automation treats it
+    as HTML.  All styles are inlined for maximum email-client compatibility.
     """
     month_name = calendar.month_name[month_start.month]
-    lines: List[str] = []
-    lines.append("Hi team,")
-    lines.append("")
-    lines.append(f"{month_name} {month_start.year} summary")
-    lines.append(f"Dates: {month_start.isoformat()} to {month_end.isoformat()}")
-    lines.append("")
-    lines.append(f"Top {len(top_outliers)} sites by absolute % deviation (Inv vs Meter):")
+    total_sites = synced_sites + inverter_only_sites + no_comparison_sites + site_errors
+
+    # Outlier list
+    outlier_items: List[str] = []
     for site, diff, link in top_outliers:
         pct = diff * 100.0
-        link_part = link if link else "n/a"
-        lines.append(f"- {site}: {pct:+.1f}% | {link_part}")
-    lines.append("")
-    lines.append("Monthly totals by site:")
-    if omitted_no_data_sites:
-        lines.append(f"(Omitted {omitted_no_data_sites} sites with no meter/inverter/portal data for the month)")
+        colour = "#dc2626" if abs(pct) > 5.0 else ("#f59e0b" if abs(pct) > 2.0 else "#16a34a")
+        site_label = (
+            f'<a href="{link}" style="color:#2563eb;text-decoration:none;">{site}</a>'
+            if link else site
+        )
+        outlier_items.append(
+            f'<li style="margin:3px 0;">{site_label}: '
+            f'<span style="color:{colour};font-weight:600;">{pct:+.1f}%</span></li>'
+        )
+    outlier_html = (
+        f'<ul style="margin:6px 0 6px 20px;padding:0;">{"".join(outlier_items)}</ul>'
+        if outlier_items else '<p style="color:#6b7280;font-style:italic;">No outlier data available.</p>'
+    )
 
-    # Important: keep the whole table as a single string so the surrounding
-    # "<br>" join doesn't insert breaks inside table markup.
-    table_parts: List[str] = []
-    table_parts.append("<table border=\"1\" cellspacing=\"0\" cellpadding=\"4\">")
-    table_parts.append("<thead><tr>")
-    table_parts.append("<th>Site</th>")
-    table_parts.append("<th>Juggle Meter (kWh)</th>")
-    table_parts.append("<th>Juggle Inverter (kWh)</th>")
-    table_parts.append("<th>Inverter Portal (kWh)</th>")
-    table_parts.append("<th>% Diff (Inv vs Meter)</th>")
-    table_parts.append("</tr></thead><tbody>")
-    for site, meter_kwh, inv_kwh, portal_kwh, diff_frac, url in site_rows:
-        site_cell = f"<a href=\"{url}\">{site}</a>" if url else site
-        portal_cell = f"{portal_kwh:.1f}" if portal_kwh > 0 else "-"
-        diff_cell = f"{diff_frac * 100.0:+.1f}%" if (meter_kwh > 0 and inv_kwh > 0) else "-"
-        table_parts.append("<tr>")
-        table_parts.append(f"<td>{site_cell}</td>")
-        table_parts.append(f"<td>{meter_kwh:.1f}</td>")
-        table_parts.append(f"<td>{inv_kwh:.1f}</td>")
-        table_parts.append(f"<td>{portal_cell}</td>")
-        table_parts.append(f"<td>{diff_cell}</td>")
-        table_parts.append("</tr>")
-    table_parts.append("</tbody></table>")
-    lines.append("".join(table_parts))
-    lines.append("")
-    lines.append(f"Synced Sites: {synced_sites}")
-    lines.append(f"Inverter-only Sites: {inverter_only_sites}")
-    lines.append(f"No-comparison Sites: {no_comparison_sites}")
-    lines.append(f"Site Errors: {site_errors}")
-    lines.append("")
-    lines.append("Thanks,")
-    lines.append("Solar Platform Bot")
+    # Table
+    table_html = _table_html(site_rows) if site_rows else (
+        '<p style="color:#6b7280;font-style:italic;">No sites with data for this month.</p>'
+    )
+
+    # Omission note
+    omission = ""
+    if omitted_no_data_sites:
+        omission = (
+            f'<p style="font-size:12px;color:#6b7280;margin:4px 0 12px;">'
+            f'({omitted_no_data_sites} site{"s" if omitted_no_data_sites != 1 else ""} '
+            f'omitted — no meter/inverter/portal data for the month)</p>'
+        )
+
+    # Test banner
+    test_banner = ""
     if run_type.upper() == "TEST":
-        lines.append("")
-        lines.append("This is a TEST draft. Do not send to production recipients.")
-    return "<br>".join(lines)
+        test_banner = (
+            '<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;'
+            'padding:10px 14px;margin-bottom:16px;font-size:13px;color:#92400e;">'
+            "\u26a0\ufe0f <strong>TEST DRAFT</strong> \u2014 Do not forward to production recipients."
+            "</div>"
+        )
+
+    html = f"""\
+<div style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;max-width:800px;margin:0 auto;line-height:1.5;">
+{test_banner}\
+<p style="margin:0 0 4px;">Hi team,</p>
+
+<h2 style="color:#1a3a5c;font-size:18px;margin:20px 0 6px;border-bottom:2px solid #e5e7eb;padding-bottom:6px;">
+  Monthly Solar Portfolio Summary &mdash; {month_name} {month_start.year}
+</h2>
+<p style="color:#6b7280;font-size:13px;margin:0 0 14px;">
+  Reporting period: {month_start.isoformat()} to {month_end.isoformat()}
+</p>
+
+<h3 style="color:#374151;font-size:15px;margin:18px 0 4px;">Top {len(top_outliers)} Outliers by Absolute % Deviation (Inv vs Meter)</h3>
+{outlier_html}
+
+<h3 style="color:#374151;font-size:15px;margin:18px 0 4px;">Monthly Totals by Site</h3>
+{omission}\
+{table_html}
+
+<h3 style="color:#374151;font-size:15px;margin:18px 0 4px;">Coverage</h3>
+<table style="font-family:Arial,Helvetica,sans-serif;font-size:13px;border-collapse:collapse;margin-bottom:16px;">
+  <tr><td style="padding:3px 12px 3px 0;color:#6b7280;">Synced Sites</td><td style="font-weight:600;">{synced_sites} / {total_sites}</td></tr>
+  <tr><td style="padding:3px 12px 3px 0;color:#6b7280;">Inverter-only Sites</td><td style="font-weight:600;">{inverter_only_sites}</td></tr>
+  <tr><td style="padding:3px 12px 3px 0;color:#6b7280;">No-comparison Sites</td><td style="font-weight:600;">{no_comparison_sites}</td></tr>
+  <tr><td style="padding:3px 12px 3px 0;color:#6b7280;">Site Errors</td><td style="font-weight:600;{' color:#dc2626;' if site_errors > 0 else ''}">{site_errors}</td></tr>
+</table>
+
+<p style="margin:16px 0 0;font-size:12px;color:#9ca3af;">
+  Thanks,<br>Solar Platform Bot
+</p>
+</div>"""
+    return html
 
 
 def _rich_text(value: str) -> Dict[str, Any]:

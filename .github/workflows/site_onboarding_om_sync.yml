@@ -2,7 +2,9 @@ name: Site Onboarding to O&M Sync
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    # Every 15 min — balances responsiveness with runner minutes budget.
+    # The workflow also supports repository_dispatch for instant webhook-driven runs.
+    - cron: '*/15 * * * *'
   repository_dispatch:
   workflow_dispatch:
     inputs:
