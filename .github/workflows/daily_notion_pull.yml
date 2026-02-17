@@ -6,6 +6,8 @@ on:
     # then gate to exactly 04:00 Europe/London to handle DST.
     - cron: '0 3 * * *'
     - cron: '0 4 * * *'
+    # One-off verification run – 06:15 UTC 17 Feb 2026 (remove after confirming it works)
+    - cron: '15 6 17 2 *'
   workflow_dispatch:
     inputs:
       mode:
@@ -37,12 +39,18 @@ jobs:
       - name: UK 4am gate (DST-aware)
         if: github.event_name == 'schedule'
         id: uk4_gate
+        working-directory: .
         run: |
           set -euo pipefail
           UK_HOUR="$(TZ=Europe/London date +%H)"
+          UK_DATE="$(TZ=Europe/London date +%Y-%m-%d)"
           if [ "${UK_HOUR}" = "04" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "Proceeding: UK local time is 04:00."
+          elif [ "${UK_HOUR}" = "06" ] && [ "${UK_DATE}" = "2026-02-17" ]; then
+            # One-off verification run (remove this branch after confirming it works)
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Proceeding: one-off verification at UK 06:xx on 2026-02-17."
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "Skipping: UK local time is ${UK_HOUR}:00 (not 04:00)."
