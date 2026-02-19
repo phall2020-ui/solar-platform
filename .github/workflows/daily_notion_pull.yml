@@ -172,3 +172,11 @@ jobs:
           path: tools/inverter-data-juggle/sync_snapshots/*.json
           if-no-files-found: ignore
           retention-days: 30
+
+      - name: Trigger Point Lane nightly sync
+        if: success()
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.REPO_DISPATCH_TOKEN }}
+          repository: phall2020-ui/experimental-repo
+          event-type: nightly-sync
