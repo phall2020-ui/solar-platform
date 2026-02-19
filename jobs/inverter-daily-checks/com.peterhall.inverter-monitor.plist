@@ -7,12 +7,12 @@
     
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
-        <string>/Users/peterhall/Documents/Python Scripts/Inverter daily checks/inverter_monitor.py</string>
+        <string>/Users/peterhall/Documents/GitHub/solar-platform/jobs/inverter-daily-checks/.venv/bin/python3</string>
+        <string>/Users/peterhall/Documents/GitHub/solar-platform/jobs/inverter-daily-checks/inverter_monitor.py</string>
     </array>
     
     <key>WorkingDirectory</key>
-    <string>/Users/peterhall/Documents/Python Scripts/Inverter daily checks</string>
+    <string>/Users/peterhall/Documents/GitHub/solar-platform/jobs/inverter-daily-checks</string>
     
     <key>StartInterval</key>
     <integer>7200</integer>
@@ -21,10 +21,10 @@
     <true/>
     
     <key>StandardOutPath</key>
-    <string>/Users/peterhall/Documents/Python Scripts/Inverter daily checks/logs/launchd_stdout.log</string>
+    <string>/Users/peterhall/Documents/GitHub/solar-platform/jobs/inverter-daily-checks/logs/launchd_stdout.log</string>
     
     <key>StandardErrorPath</key>
-    <string>/Users/peterhall/Documents/Python Scripts/Inverter daily checks/logs/launchd_stderr.log</string>
+    <string>/Users/peterhall/Documents/GitHub/solar-platform/jobs/inverter-daily-checks/logs/launchd_stderr.log</string>
     
     <key>EnvironmentVariables</key>
     <dict>

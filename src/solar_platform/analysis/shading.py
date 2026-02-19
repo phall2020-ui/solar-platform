@@ -178,6 +178,14 @@ class ShadingEngine(AnalysisEngine):
         shoulder_compare = compare_profile[compare_profile["hour"].isin(_SHOULDER_HOURS)]["compare_ratio"].median()
         shoulder_ratio = float((shoulder_compare / midday_base) if pd.notna(midday_base) and midday_base else 1.0)
 
+        # Normalise profiles to 0-1 so chart thresholds are meaningful
+        peak = hourly["baseline_ratio"].max()
+        if pd.notna(peak) and peak > 0:
+            hourly["baseline_ratio"] = hourly["baseline_ratio"] / peak
+            hourly["compare_ratio"] = hourly["compare_ratio"] / peak
+            hourly["shading_delta"] = hourly["baseline_ratio"] - hourly["compare_ratio"]
+            # ratio (compare/baseline) is scale-invariant, no need to redo
+
         return AnalysisResult(
             analysis_type=self.analysis_type,
             plant_uid=plant_uid,
@@ -213,6 +221,11 @@ class ShadingEngine(AnalysisEngine):
 
         shading_ratio = float((shoulder / midday) if pd.notna(midday) and midday else 1.0)
         shading_loss_pct = max(0.0, min((1.0 - shading_ratio) * 100.0, 100.0))
+
+        # Normalise hourly profile to 0-1 so chart thresholds are meaningful
+        peak = hourly["norm_ratio"].max()
+        if pd.notna(peak) and peak > 0:
+            hourly["norm_ratio"] = hourly["norm_ratio"] / peak
 
         return AnalysisResult(
             analysis_type=self.analysis_type,
