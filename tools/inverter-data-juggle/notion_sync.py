@@ -378,7 +378,6 @@ def _safe_num(value: Any) -> float:
 # ---------------------------------------------------------------------------
 # Alert label helpers
 # ---------------------------------------------------------------------------
-ALERT_WARNING_PCT = 3.0
 ALERT_CRITICAL_PCT = 5.0
 
 
@@ -386,11 +385,10 @@ def compute_daily_alert(inv_daily: float, meter_daily: float) -> str:
     """Return an alert label for a single day's inverter vs meter comparison.
 
     Categories:
-      - 'Critical'  – abs diff >= 5 %
-      - 'Warning'   – abs diff > 3 %
-      - 'Meter Only' – meter > 0 but inverter == 0
+      - 'Critical'      – abs diff > 5 %
+      - 'Meter Only'    – meter > 0 but inverter == 0
       - 'Inverter Only' – inverter > 0 but meter == 0
-      - 'OK'        – within tolerance (or both zero)
+      - 'OK'            – within tolerance (or both zero)
     """
     has_inv = inv_daily > 0
     has_meter = meter_daily > 0
@@ -403,10 +401,8 @@ def compute_daily_alert(inv_daily: float, meter_daily: float) -> str:
         return "OK"
 
     diff_pct = abs((inv_daily - meter_daily) / meter_daily) * 100.0
-    if diff_pct >= ALERT_CRITICAL_PCT:
+    if diff_pct > ALERT_CRITICAL_PCT:
         return "Critical"
-    if diff_pct > ALERT_WARNING_PCT:
-        return "Warning"
     return "OK"
 
 

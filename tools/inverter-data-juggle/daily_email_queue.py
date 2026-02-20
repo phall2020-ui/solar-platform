@@ -324,51 +324,66 @@ def build_body(
 ) -> str:
     month_name = calendar.month_name[month_start.month]
     total_sites = synced_daily + inverter_only_daily + no_comp_daily + site_errors
+    critical_threshold_pct = 5.0
 
-    daily_table = _table_html(daily_rows) if daily_rows else (
-        '<p style="color:#6b7280;font-style:italic;">No sites with data for previous day.</p>'
-    )
-    mtd_table = _table_html(mtd_rows) if mtd_rows else (
-        '<p style="color:#6b7280;font-style:italic;">No sites with data for month-to-date.</p>'
-    )
+    def _alert_label(diff_frac: Optional[float]) -> Optional[str]:
+        if diff_frac is None:
+            return None
+        diff_pct = abs(diff_frac * 100.0)
+        if diff_pct > critical_threshold_pct:
+            return "CRITICAL"
+        return None
 
-    test_banner = ""
+    def _build_alert_lines(rows: List[Tuple[str, float, float, float, Optional[float], str]]) -> List[str]:
+        alerts: List[str] = []
+        for site, meter_kwh, inv_kwh, _portal_kwh, diff_frac, _url in rows:
+            label = _alert_label(diff_frac)
+            if label is None:
+                continue
+            diff_pct = (diff_frac or 0.0) * 100.0
+            alerts.append(
+                f"- [{label}] {site} | Juggle Inv: {inv_kwh:,.1f} kWh | Meter: {meter_kwh:,.1f} kWh | Diff: {diff_pct:+.1f}%"
+            )
+        return alerts
+
+    daily_alerts = _build_alert_lines(daily_rows)
+    mtd_alerts = _build_alert_lines(mtd_rows)
+
+    lines: List[str] = []
     if run_type.upper() == "TEST":
-        test_banner = (
-            '<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;'
-            'padding:10px 14px;margin-bottom:16px;font-size:13px;color:#92400e;">'
-            "\u26a0\ufe0f <strong>TEST DRAFT</strong> \u2014 Do not forward to production recipients."
-            "</div>"
-        )
+        lines.append("[TEST DRAFT] Do not forward to production recipients.")
+        lines.append("")
 
-    html = f"""\
-<div style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;max-width:800px;margin:0 auto;line-height:1.5;">
-{test_banner}\
-<p style="margin:0 0 4px;">Hi team,</p>
+    lines.append("Hi team,")
+    lines.append("")
+    lines.append(f"Daily Solar Portfolio Summary - {report_day.isoformat()}")
+    lines.append("")
+    lines.append("Yesterday Alerts (Warning/Critical)")
+    if daily_alerts:
+        lines.extend(daily_alerts)
+    else:
+        lines.append("- No warning/critical alerts.")
 
-<h2 style="color:#1a3a5c;font-size:18px;margin:20px 0 6px;border-bottom:2px solid #e5e7eb;padding-bottom:6px;">
-  Daily Solar Portfolio Summary &mdash; {report_day.isoformat()}
-</h2>
+    lines.append("")
+    lines.append(
+        f"MTD Alerts (Warning/Critical) - {month_name} {month_start.year} ({month_start.isoformat()} to {report_day.isoformat()})"
+    )
+    if mtd_alerts:
+        lines.extend(mtd_alerts)
+    else:
+        lines.append("- No warning/critical alerts.")
 
-<h3 style="color:#374151;font-size:15px;margin:18px 0 4px;">Previous Day (per-site)</h3>
-{daily_table}
+    lines.append("")
+    lines.append("Coverage")
+    lines.append(f"- Synced Sites (daily): {synced_daily} / {total_sites}")
+    lines.append(f"- Inverter-only Sites: {inverter_only_daily}")
+    lines.append(f"- No-comparison Sites: {no_comp_daily}")
+    lines.append(f"- Site Errors: {site_errors}")
+    lines.append("")
+    lines.append("Thanks,")
+    lines.append("Solar Platform Bot")
 
-<h3 style="color:#374151;font-size:15px;margin:18px 0 4px;">Month-to-Date: {month_name} {month_start.year} ({month_start.isoformat()} to {report_day.isoformat()})</h3>
-{mtd_table}
-
-<h3 style="color:#374151;font-size:15px;margin:18px 0 4px;">Coverage</h3>
-<table style="font-family:Arial,Helvetica,sans-serif;font-size:13px;border-collapse:collapse;margin-bottom:16px;">
-  <tr><td style="padding:3px 12px 3px 0;color:#6b7280;">Synced Sites (daily)</td><td style="font-weight:600;">{synced_daily} / {total_sites}</td></tr>
-  <tr><td style="padding:3px 12px 3px 0;color:#6b7280;">Inverter-only Sites</td><td style="font-weight:600;">{inverter_only_daily}</td></tr>
-  <tr><td style="padding:3px 12px 3px 0;color:#6b7280;">No-comparison Sites</td><td style="font-weight:600;">{no_comp_daily}</td></tr>
-  <tr><td style="padding:3px 12px 3px 0;color:#6b7280;">Site Errors</td><td style="font-weight:600;{' color:#dc2626;' if site_errors > 0 else ''}">{site_errors}</td></tr>
-</table>
-
-<p style="margin:16px 0 0;font-size:12px;color:#9ca3af;">
-  Thanks,<br>Solar Platform Bot
-</p>
-</div>"""
-    return html
+    return "\n".join(lines)
 
 
 def parse_args() -> argparse.Namespace:
