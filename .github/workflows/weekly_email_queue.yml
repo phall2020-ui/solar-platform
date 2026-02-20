@@ -1,12 +1,10 @@
-name: Daily Email Queue (Retired — use Weekly Email Queue)
+name: Weekly Email Queue
 
 on:
-  # RETIRED: automatic daily trigger removed.
-  # Weekly alerts are now handled by weekly_email_queue.yml (Monday 4am UK).
-  # This workflow is kept for manual one-off dispatches only.
-  # workflow_run:
-  #   workflows: ["Daily Notion Pull"]
-  #   types: [completed]
+  schedule:
+    # Run at 03:00 and 04:00 UTC every Monday; UK-time gate picks 04:00 local.
+    - cron: '0 3 * * 1'
+    - cron: '0 4 * * 1'
   workflow_dispatch:
     inputs:
       run_type:
@@ -17,12 +15,12 @@ on:
         options:
           - TEST
           - PROD
-      date:
-        description: "Report date (YYYY-MM-DD). Leave blank for previous day."
+      week_start:
+        description: "Monday of target week (YYYY-MM-DD). Leave blank for previous week."
         required: false
         default: ""
       recipients:
-        description: "Comma-separated recipients (optional; falls back to DAILY_EMAIL_RECIPIENTS then MONTHLY_EMAIL_RECIPIENTS)"
+        description: "Comma-separated recipients (optional; falls back to secrets)"
         required: false
         default: ""
       overwrite_existing:
@@ -31,24 +29,43 @@ on:
         default: "false"
 
 concurrency:
-  group: daily-email-queue
+  group: weekly-email-queue
   cancel-in-progress: true
 
 jobs:
-  queue-daily-email:
+  queue-weekly-email:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Only manual dispatch now (weekly_email_queue.yml handles scheduled alerts).
-    if: github.event_name == 'workflow_dispatch'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'schedule' &&
+        github.ref == 'refs/heads/main'
+      )
     env:
-      # Comparison DB (daily sync target).
-      # Source: https://www.notion.so/3041773a96c08150b90ed65a266ee6a7
       COMPARISON_DB_ID: 3041773a-96c0-8150-b90e-d65a266ee6a7
-      # Email queue DB.
-      # Source: https://www.notion.so/3061773a96c081cfa9a0f9aa521b70ea
       QUEUE_DB_ID: 3061773a-96c0-81cf-a9a0-f9aa521b70ea
 
     steps:
+      - name: UK 4am Monday gate (DST-aware)
+        id: gate
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" != "schedule" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Non-schedule trigger — proceeding."
+            exit 0
+          fi
+          UK_HOUR="$(TZ=Europe/London date +%H)"
+          if [ "${UK_HOUR}" = "04" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Proceeding: UK local time is 04:00 on Monday."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping: UK local time is ${UK_HOUR}:00 (not 04:00)."
+            exit 1
+          fi
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -65,19 +82,17 @@ jobs:
       - name: Validate required secrets
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          WEEKLY_EMAIL_RECIPIENTS: ${{ secrets.WEEKLY_EMAIL_RECIPIENTS }}
           DAILY_EMAIL_RECIPIENTS: ${{ secrets.DAILY_EMAIL_RECIPIENTS }}
           MONTHLY_EMAIL_RECIPIENTS: ${{ secrets.MONTHLY_EMAIL_RECIPIENTS }}
         run: |
           set -euo pipefail
-          missing=()
           if [ -z "${NOTION_TOKEN:-}" ]; then
-            missing+=("NOTION_TOKEN")
+            echo "::error::Missing required secret: NOTION_TOKEN"
+            exit 1
           fi
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ] && [ -z "${DAILY_EMAIL_RECIPIENTS:-}" ] && [ -z "${MONTHLY_EMAIL_RECIPIENTS:-}" ]; then
-            missing+=("DAILY_EMAIL_RECIPIENTS or MONTHLY_EMAIL_RECIPIENTS (required for automatic runs)")
-          fi
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "::error::Missing required secrets: ${missing[*]}"
+          if [ -z "${WEEKLY_EMAIL_RECIPIENTS:-}" ] && [ -z "${DAILY_EMAIL_RECIPIENTS:-}" ] && [ -z "${MONTHLY_EMAIL_RECIPIENTS:-}" ]; then
+            echo "::error::Missing recipients secret (WEEKLY_EMAIL_RECIPIENTS, DAILY_EMAIL_RECIPIENTS, or MONTHLY_EMAIL_RECIPIENTS)"
             exit 1
           fi
 
@@ -103,42 +118,36 @@ jobs:
             r = requests.get(f"https://api.notion.com/v1/databases/{db_id}", headers=headers, timeout=30)
             if r.status_code != 200:
               print(f"Notion DB access FAILED for {db_id} ({r.status_code}): {r.text[:500]}")
-              print("If this is object_not_found, share the database with your Notion integration used by NOTION_TOKEN.")
               raise SystemExit(1)
           print("Notion DB access OK")
           PY
 
-      - name: Create/Update Queue Page
+      - name: Create/Update Weekly Queue Page
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          WEEKLY_EMAIL_RECIPIENTS: ${{ secrets.WEEKLY_EMAIL_RECIPIENTS }}
           DAILY_EMAIL_RECIPIENTS: ${{ secrets.DAILY_EMAIL_RECIPIENTS }}
           MONTHLY_EMAIL_RECIPIENTS: ${{ secrets.MONTHLY_EMAIL_RECIPIENTS }}
         run: |
           set -euo pipefail
 
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_run" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
             RUN_TYPE="PROD"
-            REPORT_DATE=""
-            RECIPIENTS="${DAILY_EMAIL_RECIPIENTS}"
-            if [ -z "${RECIPIENTS}" ]; then
-              RECIPIENTS="${MONTHLY_EMAIL_RECIPIENTS}"
-            fi
+            WEEK_START=""
+            RECIPIENTS="${WEEKLY_EMAIL_RECIPIENTS:-${DAILY_EMAIL_RECIPIENTS:-${MONTHLY_EMAIL_RECIPIENTS:-}}}"
             OVERWRITE="false"
           else
             RUN_TYPE="${{ inputs.run_type }}"
-            REPORT_DATE="${{ inputs.date }}"
+            WEEK_START="${{ inputs.week_start }}"
             RECIPIENTS="${{ inputs.recipients }}"
             OVERWRITE="${{ inputs.overwrite_existing }}"
             if [ -z "${RECIPIENTS}" ]; then
-              RECIPIENTS="${DAILY_EMAIL_RECIPIENTS}"
-            fi
-            if [ -z "${RECIPIENTS}" ]; then
-              RECIPIENTS="${MONTHLY_EMAIL_RECIPIENTS}"
+              RECIPIENTS="${WEEKLY_EMAIL_RECIPIENTS:-${DAILY_EMAIL_RECIPIENTS:-${MONTHLY_EMAIL_RECIPIENTS:-}}}"
             fi
           fi
 
           if [ -z "${RECIPIENTS}" ]; then
-            echo "::error::Missing recipients. Provide workflow input 'recipients' or set secret DAILY_EMAIL_RECIPIENTS/MONTHLY_EMAIL_RECIPIENTS."
+            echo "::error::Missing recipients."
             exit 1
           fi
 
@@ -149,12 +158,12 @@ jobs:
             --queue-db-id "${QUEUE_DB_ID}"
           )
 
-          if [ -n "${REPORT_DATE}" ]; then
-            ARGS+=(--date "${REPORT_DATE}")
+          if [ -n "${WEEK_START}" ]; then
+            ARGS+=(--week-start "${WEEK_START}")
           fi
 
           if [ "${OVERWRITE}" = "true" ]; then
             ARGS+=(--overwrite-existing)
           fi
 
-          python3 tools/inverter-data-juggle/daily_email_queue.py "${ARGS[@]}"
+          python3 tools/inverter-data-juggle/weekly_email_queue.py "${ARGS[@]}"
