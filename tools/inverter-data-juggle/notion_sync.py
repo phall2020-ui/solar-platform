@@ -327,6 +327,7 @@ def get_or_create_notion_db():
             "Juggle Meter (Daily)": {"number": {"format": "number"}},
             "Platform (Daily)": {"number": {"format": "number"}},
             "Diff (Daily) %": {"number": {"format": "percent"}},
+            "Alert (Daily)": {"select": {}},
             "Juggle Inv (MTD)": {"number": {"format": "number"}},
             "Juggle Meter (MTD)": {"number": {"format": "number"}},
             "Platform (MTD)": {"number": {"format": "number"}},
@@ -374,18 +375,55 @@ def _safe_num(value: Any) -> float:
     except Exception:
         return 0.0
 
+# ---------------------------------------------------------------------------
+# Alert label helpers
+# ---------------------------------------------------------------------------
+ALERT_WARNING_PCT = 3.0
+ALERT_CRITICAL_PCT = 5.0
+
+
+def compute_daily_alert(inv_daily: float, meter_daily: float) -> str:
+    """Return an alert label for a single day's inverter vs meter comparison.
+
+    Categories:
+      - 'Critical'  – abs diff >= 5 %
+      - 'Warning'   – abs diff > 3 %
+      - 'Meter Only' – meter > 0 but inverter == 0
+      - 'Inverter Only' – inverter > 0 but meter == 0
+      - 'OK'        – within tolerance (or both zero)
+    """
+    has_inv = inv_daily > 0
+    has_meter = meter_daily > 0
+
+    if has_meter and not has_inv:
+        return "Meter Only"
+    if has_inv and not has_meter:
+        return "Inverter Only"
+    if not has_inv and not has_meter:
+        return "OK"
+
+    diff_pct = abs((inv_daily - meter_daily) / meter_daily) * 100.0
+    if diff_pct >= ALERT_CRITICAL_PCT:
+        return "Critical"
+    if diff_pct > ALERT_WARNING_PCT:
+        return "Warning"
+    return "OK"
+
+
 def build_row_fingerprint(platform: str, di: float, dp: float, ds: float,
                           mi: float, mp: float, ms: float) -> Tuple[Any, ...]:
     platform_norm = (platform or "").strip().lower()
     platform_name = platform if platform_norm in ("solis", "solaredge") else ""
     diff_d = (di - dp) / dp if dp > 0 else 0.0
     diff_m = (mi - mp) / mp if mp > 0 else 0.0
+    alert_d = compute_daily_alert(di, dp)
     return (
         platform_name,
         round(di, 2),
         round(dp, 2),
         round(ds, 2),
         round(diff_d, 4),
+        alert_d,
         round(mi, 2),
         round(mp, 2),
         round(ms, 2),
@@ -396,12 +434,15 @@ def _page_fingerprint(page: Dict[str, Any]) -> Tuple[Any, ...]:
     props = page.get("properties", {})
     platform_sel = props.get("Platform", {}).get("select")
     platform_name = platform_sel.get("name") if isinstance(platform_sel, dict) else ""
+    alert_sel = props.get("Alert (Daily)", {}).get("select")
+    alert_name = alert_sel.get("name") if isinstance(alert_sel, dict) else "OK"
     return (
         platform_name or "",
         round(_safe_num(props.get("Juggle Inv (Daily)", {}).get("number")), 2),
         round(_safe_num(props.get("Juggle Meter (Daily)", {}).get("number")), 2),
         round(_safe_num(props.get("Platform (Daily)", {}).get("number")), 2),
         round(_safe_num(props.get("Diff (Daily) %", {}).get("number")), 4),
+        alert_name or "OK",
         round(_safe_num(props.get("Juggle Inv (MTD)", {}).get("number")), 2),
         round(_safe_num(props.get("Juggle Meter (MTD)", {}).get("number")), 2),
         round(_safe_num(props.get("Platform (MTD)", {}).get("number")), 2),
@@ -483,6 +524,7 @@ def fetch_platform_data(mapping_info, start_date, end_date):
 def sync_row(db_id, site, date_str, platform, di, dp, ds, mi, mp, ms, page_id=None):
     diff_d = (di - dp)/dp if dp > 0 else 0
     diff_m = (mi - mp)/mp if mp > 0 else 0
+    alert_d = compute_daily_alert(di, dp)
     
     props = {
         "Site": {"title": [{"text": {"content": site}}]},
@@ -491,6 +533,7 @@ def sync_row(db_id, site, date_str, platform, di, dp, ds, mi, mp, ms, page_id=No
         "Juggle Meter (Daily)": {"number": round(dp, 2)},
         "Platform (Daily)": {"number": round(ds, 2)},
         "Diff (Daily) %": {"number": round(diff_d, 4)},
+        "Alert (Daily)": {"select": {"name": alert_d}},
         "Juggle Inv (MTD)": {"number": round(mi, 2)},
         "Juggle Meter (MTD)": {"number": round(mp, 2)},
         "Platform (MTD)": {"number": round(ms, 2)},
