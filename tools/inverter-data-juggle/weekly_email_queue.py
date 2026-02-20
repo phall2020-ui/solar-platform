@@ -51,8 +51,7 @@ NOTION_TOKEN = os.environ.get("NOTION_TOKEN") or os.environ.get("NOTION_INTEGRAT
 DEFAULT_COMPARISON_DB_TITLE = "Meter / inverter comparison"
 DEFAULT_EMAIL_QUEUE_DB_TITLE = "Energy Monthly Email Queue"
 
-# Alert thresholds (must match notion_sync.py compute_daily_alert)
-ALERT_WARNING_PCT = 3.0
+# Alert threshold — must match notion_sync.py compute_daily_alert.
 ALERT_CRITICAL_PCT = 5.0
 
 
@@ -222,10 +221,8 @@ def _compute_alert(inv: float, meter: float) -> str:
     if not has_inv and not has_meter:
         return "OK"
     diff = abs((inv - meter) / meter) * 100.0
-    if diff >= ALERT_CRITICAL_PCT:
+    if diff > ALERT_CRITICAL_PCT:
         return "Critical"
-    if diff > ALERT_WARNING_PCT:
-        return "Warning"
     return "OK"
 
 
