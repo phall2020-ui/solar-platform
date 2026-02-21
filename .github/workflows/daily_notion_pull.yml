@@ -16,6 +16,10 @@ on:
         description: 'Send summary email at end of run'
         required: false
         default: 'false'
+      force_dispatch:
+        description: 'Force-trigger the Point Lane nightly sync even if Juggle sync had issues'
+        required: false
+        default: 'false'
 
 concurrency:
   group: daily-notion-pull
@@ -49,7 +53,6 @@ jobs:
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "Skipping: UK local time is ${UK_HOUR}:00 (not 04:00)."
-            exit 1
           fi
 
   # ── Main sync job ──────────────────────────────────────────────
@@ -74,6 +77,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: tools/inverter-data-juggle/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -152,16 +157,31 @@ jobs:
             EMAIL_ARGS="--send-email-summary"
           fi
 
+          run_with_retry() {
+            local cmd="$*"
+            local attempt=1
+            local max_attempts=3
+            until eval "$cmd"; do
+              if [ "$attempt" -ge "$max_attempts" ]; then
+                echo "::error::Sync command failed after ${max_attempts} attempts: ${cmd}"
+                return 1
+              fi
+              echo "Attempt ${attempt} failed. Retrying in 60 seconds..."
+              attempt=$((attempt + 1))
+              sleep 60
+            done
+          }
+
           # Month-close behavior:
           # - During the first GRACE_DAYS of a new month, we finalize the previous month.
           # - On days 2..GRACE_DAYS, we also sync current MTD so we don't miss early new-month days.
           if [ "$MODE" = "auto" ] && [ "$DAY" -le "$GRACE_DAYS" ]; then
-            python notion_sync.py --mode previous_month $EMAIL_ARGS
+            run_with_retry python notion_sync.py --mode previous_month $EMAIL_ARGS
             if [ "$DAY" -ge 2 ]; then
-              python notion_sync.py --mode current_mtd
+              run_with_retry python notion_sync.py --mode current_mtd
             fi
           else
-            python notion_sync.py --mode "$MODE" $EMAIL_ARGS
+            run_with_retry python notion_sync.py --mode "$MODE" $EMAIL_ARGS
           fi
 
       - name: Upload sync snapshots
@@ -173,8 +193,27 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+      - name: Write workflow summary
+        if: always()
+        run: |
+          MODE="${{ github.event.inputs.mode || 'auto' }}"
+          DAY="$(date -u +%d | sed 's/^0//')"
+          SYNC_STATUS="${{ job.status }}"
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Daily Notion Pull Summary
+
+          | Field | Value |
+          |---|---|
+          | Date (UTC) | $(date -u +%Y-%m-%d) |
+          | Sync mode | ${MODE} |
+          | Day of month | ${DAY} |
+          | Sync result | ${SYNC_STATUS} |
+          | Point Lane dispatch triggered | ✅ attempted |
+          EOF
+
       - name: Trigger Point Lane nightly sync
-        if: success()
+        if: always() && (needs.uk-time-gate.outputs.should_run == 'true' || github.event.inputs.force_dispatch == 'true')
+        continue-on-error: true
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.REPO_DISPATCH_TOKEN }}
