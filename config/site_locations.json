@@ -26,7 +26,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "Wales",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "PPA Shawton Engineering Ltd",
@@ -40,7 +40,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "PPA Princes Tuna",
@@ -54,7 +54,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "PPA Panorama Kitchens",
@@ -68,7 +68,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "PPA WALC Adult Learning Centre",
@@ -82,7 +82,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "PPA Dunham Forest Golf Club",
@@ -96,7 +96,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "PPA Burnley College",
@@ -124,7 +124,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "Smeed Dean Works Final",
@@ -180,7 +180,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "PPA Swift Dental Group",
@@ -194,7 +194,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "PPA Ink Tech",
@@ -222,7 +222,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "PPA Bannatynes Weybridge",
@@ -376,7 +376,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "Man City FC Training Ground",
@@ -404,7 +404,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "Merry Hill Shopping Centre",
@@ -488,7 +488,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "Haverhill",
@@ -530,7 +530,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "Smithy's Mushrooms PH2",
@@ -544,7 +544,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "Smithy's Mushrooms PH1+2",
@@ -558,7 +558,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "Parfetts Birmingham",
@@ -586,7 +586,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "Hibernian Training Ground",
@@ -628,7 +628,7 @@
       "azimuth_deg": 180.0,
       "timezone": "Europe/London",
       "region": "England",
-      "_coord_source": "manual_geo_estimate"
+      "_coord_source": "manual"
     },
     {
       "name": "Point Lane Solar Farm",
