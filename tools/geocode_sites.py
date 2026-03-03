@@ -145,6 +145,7 @@ MANUAL_COORDS: dict[str, tuple[float, float]] = {
     "Smeed Dean Works":                      (51.3700,  0.6600),
     "Smeed Dean Works Final":                (51.3700,  0.6600),
     "NIC Barking":                           (51.5400,  0.0800),
+    "PPA Uniroyal Global":                   (51.6741, -3.1442),
 }
 
 # Default tilt/azimuth/timezone for UK commercial rooftop; ground-mount sites override below
