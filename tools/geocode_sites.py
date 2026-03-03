@@ -171,6 +171,18 @@ def geocode(query: str) -> tuple[float, float] | None:
     return None
 
 
+def _region(lat: float | None, lon: float | None) -> str:
+    """Classify UK region. Heuristic based on lat/lon — correct for this portfolio."""
+    if lat is None:
+        return "Unknown"
+    if lat > 55.0:
+        return "Scotland"
+    # Welsh sites: west of -2.7°, latitude 51.3–53.5°
+    if lon is not None and lon < -2.7 and 51.3 < lat < 53.5:
+        return "Wales"
+    return "England"
+
+
 def build_site_entry(raw: dict, lat: float | None, lon: float | None, source: str) -> dict:
     name = raw["name"]
     is_ground_mount = name in GROUND_MOUNT_SITES
@@ -185,7 +197,7 @@ def build_site_entry(raw: dict, lat: float | None, lon: float | None, source: st
         "tilt_deg": 25.0 if is_ground_mount else 10.0,
         "azimuth_deg": 180.0,
         "timezone": "Europe/London",
-        "region": "Scotland" if (lat is not None and lat > 55.0) else "England",
+        "region": _region(lat, lon),
         "_coord_source": source,
     }
     return entry
@@ -196,6 +208,11 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Print results without saving")
     parser.add_argument("--force", action="store_true", help="Re-geocode even if output exists")
     args = parser.parse_args()
+
+    if OUTPUT_PATH.exists() and not args.force and not args.dry_run:
+        print(f"[INFO] Output already exists: {OUTPUT_PATH}")
+        print("[INFO] Use --force to re-geocode, or --dry-run to preview without saving.")
+        return
 
     results = []
     stats = {"geocoded": 0, "manual": 0, "null": 0}
