@@ -6,6 +6,7 @@ import base64
 import csv
 import hashlib
 import hmac
+import inspect
 import json
 import os
 from dataclasses import dataclass
@@ -13,10 +14,14 @@ from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
+import pandas as pd
 import requests
 
 from solar_platform.config import get_settings
+from solar_platform.db.repository import PlantRepository, ReadingsRepository
 from solar_platform.integrations.notion_assets import NotionAssetRegisterService
+from solar_platform.services.site_locations import SiteLocationService
+from solar_platform.weather.open_meteo import OpenMeteoArchiveClient, OpenMeteoClient
 
 
 SUPPORTED_SOURCES: tuple[str, ...] = (
@@ -60,6 +65,30 @@ SOURCE_IDENTIFIER_FIELD_CANDIDATES: dict[str, tuple[str, ...]] = {
 }
 
 DATA_SOURCE_MATCH_FIELD_CANDIDATES: tuple[str, ...] = ("Data Source Match",)
+
+CAPACITY_FIELD_CANDIDATES: tuple[str, ...] = (
+    "TIC kWp",
+    "Installed Capacity",
+    "Installed Capacity kWp",
+    "Capacity kWp",
+    "Capacity",
+    "DC Size kWp",
+    "kWp",
+)
+
+PPA_RATE_FIELD_CANDIDATES: tuple[str, ...] = (
+    "PPA Rate",
+    "PPA Rate (GBP/MWh)",
+    "PPA Rate (£/MWh)",
+    "PPA Rate (p/kWh)",
+    "PPA Rate p/kWh",
+    "PPA Tariff",
+    "Tariff",
+    "Tariff Rate",
+    "Export Rate",
+)
+
+TARGET_PR_ASSUMPTION = 0.80
 
 DEFAULT_DATA_SOURCE_MATCH_UPDATES: dict[str, str] = {
     "BAE Fylde": "Newfold Farm",
@@ -123,6 +152,8 @@ DEFAULT_CONFIRMED_SOURCE_REGISTRY: dict[str, dict[str, str]] = {
 
 TRIAGE_DATABASE_TITLE = "Solar Copilot Daily Triage"
 
+DAILY_JSON_DATABASE_TITLE = "Daily JSON"
+
 TRIAGE_DATABASE_PROPERTIES: dict[str, dict[str, Any]] = {
     "Asset": {"title": {}},
     "Row Key": {"rich_text": {}},
@@ -145,6 +176,101 @@ TRIAGE_DATABASE_PROPERTIES: dict[str, dict[str, Any]] = {
     "Preferred Source": {"rich_text": {}},
     "Match Method": {"rich_text": {}},
     "Has Any Data": {"checkbox": {}},
+}
+
+DAILY_JSON_DATABASE_PROPERTIES: dict[str, dict[str, Any]] = {
+    "Asset": {"title": {}},
+    "Row Key": {"rich_text": {}},
+    "Target Date": {"date": {}},
+    "PAC Date": {"date": {}},
+    "PAC Phase": {"rich_text": {}},
+    "PAC In Past": {"checkbox": {}},
+    "PAC Date Missing": {"checkbox": {}},
+    "Has Any Data": {"checkbox": {}},
+    "Sources With Data": {"rich_text": {}},
+    "Preferred Source": {"rich_text": {}},
+    "Checked Sources": {"rich_text": {}},
+    "Match Name": {"rich_text": {}},
+    "Match Method": {"rich_text": {}},
+    "Match Confidence": {"number": {"format": "number"}},
+    "Resolved Source Types": {"rich_text": {}},
+    "Resolution Notes": {"rich_text": {}},
+    "Project Name": {"rich_text": {}},
+    "Customer": {"rich_text": {}},
+    "SPV": {"rich_text": {}},
+    "Priority": {"rich_text": {}},
+    "Site Address": {"rich_text": {}},
+    "AM Contact": {"rich_text": {}},
+    "AM Contact Email": {"email": {}},
+    "Notion Page ID": {"rich_text": {}},
+    "Asset Register URL": {"url": {}},
+    "Capacity kWp": {"number": {"format": "number"}},
+    "PPA Rate (GBP/MWh)": {"number": {"format": "number"}},
+    "PPA Rate Source": {"rich_text": {}},
+    "Target PR Assumption (%)": {"number": {"format": "percent"}},
+    "Target Gen Yesterday (kWh)": {"number": {"format": "number"}},
+    "Target Revenue Yesterday (£)": {"number": {"format": "number"}},
+    "Target Weather Yesterday": {"rich_text": {}},
+    "Target Gen Today (kWh)": {"number": {"format": "number"}},
+    "Target Revenue Today (£)": {"number": {"format": "number"}},
+    "Target Weather Today": {"rich_text": {}},
+    "Target Gen Week (kWh)": {"number": {"format": "number"}},
+    "Target Revenue Week (£)": {"number": {"format": "number"}},
+    "Target Weather Week": {"rich_text": {}},
+    "Target Revenue Message": {"rich_text": {}},
+    "Curtailment Event Type": {"rich_text": {}},
+    "Curtailment Generation Loss (kWh)": {"number": {"format": "number"}},
+    "Curtailment Revenue Loss (£)": {"number": {"format": "number"}},
+    "Curtailment Confidence": {"number": {"format": "number"}},
+    "Curtailment Message": {"rich_text": {}},
+    "Irradiance Source": {"rich_text": {}},
+    "Irradiance Device ID": {"rich_text": {}},
+    "Irradiance Threshold W/m2": {"number": {"format": "number"}},
+    "Daylight HH Periods": {"number": {"format": "number"}},
+    "Available HH Periods": {"number": {"format": "number"}},
+    "Availability (%)": {"number": {"format": "percent"}},
+    "Actual Daylight (kWh)": {"number": {"format": "number"}},
+    "Expected Daylight (kWh)": {"number": {"format": "number"}},
+    "H POA Daylight (kWh/m2)": {"number": {"format": "number"}},
+    "PR (%)": {"number": {"format": "percent"}},
+    "Irradiance Message": {"rich_text": {}},
+    "Inverter Count": {"number": {"format": "number"}},
+    "Inverters Reporting": {"number": {"format": "number"}},
+    "Best Inverter Availability (%)": {"number": {"format": "percent"}},
+    "Worst Inverter Availability (%)": {"number": {"format": "percent"}},
+    "Inverter Availability Summary": {"rich_text": {}},
+    "Inverter Availability Breakdown": {"rich_text": {}},
+    "Juggle Identifier": {"rich_text": {}},
+    "Juggle Status": {"rich_text": {}},
+    "Juggle Has Data": {"checkbox": {}},
+    "Juggle Sample Count": {"number": {"format": "number"}},
+    "Juggle Message": {"rich_text": {}},
+    "SolarEdge Identifier": {"rich_text": {}},
+    "SolarEdge Status": {"rich_text": {}},
+    "SolarEdge Has Data": {"checkbox": {}},
+    "SolarEdge Sample Count": {"number": {"format": "number"}},
+    "SolarEdge Message": {"rich_text": {}},
+    "Solis Identifier": {"rich_text": {}},
+    "Solis Status": {"rich_text": {}},
+    "Solis Has Data": {"checkbox": {}},
+    "Solis Sample Count": {"number": {"format": "number"}},
+    "Solis Message": {"rich_text": {}},
+    "Enphase Identifier": {"rich_text": {}},
+    "Enphase Status": {"rich_text": {}},
+    "Enphase Has Data": {"checkbox": {}},
+    "Enphase Sample Count": {"number": {"format": "number"}},
+    "Enphase Message": {"rich_text": {}},
+    "Huawei Identifier": {"rich_text": {}},
+    "Huawei Status": {"rich_text": {}},
+    "Huawei Has Data": {"checkbox": {}},
+    "Huawei Sample Count": {"number": {"format": "number"}},
+    "Huawei Message": {"rich_text": {}},
+    "SMA Identifier": {"rich_text": {}},
+    "SMA Status": {"rich_text": {}},
+    "SMA Has Data": {"checkbox": {}},
+    "SMA Sample Count": {"number": {"format": "number"}},
+    "SMA Message": {"rich_text": {}},
+    "Daily JSON": {"rich_text": {}},
 }
 
 ASSET_CONTEXT_FIELD_CANDIDATES: dict[str, tuple[str, ...]] = {
@@ -238,6 +364,21 @@ def _get_value(row: dict[str, Any], candidates: tuple[str, ...]) -> Any:
     return None
 
 
+def _get_candidate_and_value(row: dict[str, Any], candidates: tuple[str, ...]) -> tuple[str, Any]:
+    if not row:
+        return "", None
+
+    normalised = {_normalise_key(key): (key, value) for key, value in row.items()}
+    for candidate in candidates:
+        matched = normalised.get(_normalise_key(candidate))
+        if matched is None:
+            continue
+        original_key, value = matched
+        if value not in (None, "", []):
+            return str(original_key), value
+    return "", None
+
+
 def _coerce_date(value: Any) -> date | None:
     if value is None or value == "":
         return None
@@ -280,6 +421,57 @@ def _extract_asset_context(row: dict[str, Any]) -> dict[str, str]:
     if not context.get("project_name"):
         context["project_name"] = _extract_asset_name(row)
     return context
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value in (None, "", [], {}):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_capacity_kwp(row: dict[str, Any]) -> float | None:
+    return _coerce_float(_get_value(row, CAPACITY_FIELD_CANDIDATES))
+
+
+def _extract_ppa_rate_gbp_mwh(row: dict[str, Any]) -> tuple[float | None, str]:
+    field_name, raw_value = _get_candidate_and_value(row, PPA_RATE_FIELD_CANDIDATES)
+    if raw_value in (None, "", [], {}):
+        return None, ""
+
+    raw_text = str(raw_value).strip()
+    numeric_text = (
+        raw_text.replace("£", "")
+        .replace("GBP", "")
+        .replace("gbp", "")
+        .replace("/MWh", "")
+        .replace("/mwh", "")
+        .replace("/kWh", "")
+        .replace("/kwh", "")
+        .replace("p/kWh", "")
+        .replace("p/kwh", "")
+        .replace("p per kWh", "")
+        .replace("p per kwh", "")
+        .replace(",", "")
+        .strip()
+    )
+    numeric_value = _coerce_float(numeric_text)
+    if numeric_value is None:
+        return None, field_name
+
+    field_key = _normalise_key(field_name)
+    value_key = _normalise_key(raw_text)
+    if "p/kwh" in field_key or "pence" in field_key or "p/kwh" in value_key or "p per kwh" in value_key:
+        return numeric_value * 10.0, field_name
+    if "£/kwh" in field_key or "gbp/kwh" in field_key or "£/kwh" in value_key or "gbp/kwh" in value_key:
+        return numeric_value * 1000.0, field_name
+    if "£/mwh" in field_key or "gbp/mwh" in field_key or "£/mwh" in value_key or "gbp/mwh" in value_key:
+        return numeric_value, field_name
+
+    inferred_value = numeric_value * 10.0 if numeric_value <= 20.0 else numeric_value
+    return inferred_value, field_name
 
 
 def _build_evidence_summary(row: dict[str, Any], context: dict[str, str]) -> str:
@@ -451,14 +643,38 @@ def _build_fallback_email_draft(
     )
 
 
-def _text_property(value: Any) -> dict[str, Any]:
+def _build_rich_text_items(value: Any, *, chunk_size: int = 1800) -> list[dict[str, Any]]:
     text = "" if value is None else str(value).strip()
-    return {"rich_text": [] if not text else [{"text": {"content": text}}]}
+    if not text:
+        return []
+    return [{"text": {"content": text[i:i + chunk_size]}} for i in range(0, len(text), chunk_size)]
+
+
+def _text_property(value: Any) -> dict[str, Any]:
+    return {"rich_text": _build_rich_text_items(value)}
 
 
 def _title_property(value: Any) -> dict[str, Any]:
     text = "" if value is None else str(value).strip()
     return {"title": [] if not text else [{"text": {"content": text}}]}
+
+
+def _date_property(value: Any) -> dict[str, Any]:
+    text = "" if value is None else str(value).strip()
+    return {"date": {"start": text}} if text else {"date": None}
+
+
+def _number_property(value: Any) -> dict[str, Any]:
+    numeric = _coerce_float(value)
+    return {"number": numeric}
+
+
+def _derive_pac_phase(pac_date: date | None, as_of_date: date) -> str:
+    if pac_date is None:
+        return "unknown"
+    if pac_date < as_of_date:
+        return "post_pac"
+    return "pre_pac"
 
 
 def _coerce_platform_tokens(value: Any) -> list[str]:
@@ -597,23 +813,7 @@ class AdapterDailyChecker:
 class SolarEdgeDailyChecker:
     def __init__(self) -> None:
         self.base_url = os.getenv("SOLAREDGE_API_URL", "https://monitoringapi.solaredge.com")
-        self.site_keys = self._load_site_keys()
-
-    def _load_site_keys(self) -> dict[str, str]:
-        raw = str(os.getenv("SOLAREDGE_KEYS_JSON", "")).strip()
-        if not raw:
-            return {}
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
-            return {}
-        if not isinstance(payload, dict):
-            return {}
-        return {
-            str(site_id).strip(): str(api_key).strip()
-            for site_id, api_key in payload.items()
-            if _clean_identifier(site_id) and _clean_identifier(api_key)
-        }
+        self.site_keys = _load_solaredge_site_keys()
 
     def _build_adapter(self, api_key: str):
         from solar_platform.ingestion.solaredge_adapter import SolarEdgeAdapter
@@ -775,6 +975,702 @@ def build_default_checkers() -> dict[str, DailyDataChecker]:
     }
 
 
+def _load_solaredge_site_keys() -> dict[str, str]:
+    raw = str(os.getenv("SOLAREDGE_KEYS_JSON", "")).strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        str(site_id).strip(): str(api_key).strip()
+        for site_id, api_key in payload.items()
+        if _clean_identifier(site_id) and _clean_identifier(api_key)
+    }
+
+
+class OpenMeteoArchiveIrradianceFetcher:
+    """Thin adapter over the shared weather archive client."""
+
+    ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+
+    def __init__(self, client: OpenMeteoArchiveClient | None = None) -> None:
+        self.client = client or OpenMeteoArchiveClient()
+
+    def fetch_half_hourly(
+        self,
+        *,
+        target_date: date,
+        latitude: float,
+        longitude: float,
+        timezone: str,
+        tilt_deg: float,
+        azimuth_deg: float,
+    ) -> pd.DataFrame:
+        records = self.client.fetch_archive(
+            plant_name="irradiance_lookup",
+            target_date=target_date,
+            lat=latitude,
+            lon=longitude,
+            timezone=timezone,
+            tilt_deg=tilt_deg,
+            azimuth_deg=azimuth_deg,
+        )
+        if not records:
+            return pd.DataFrame(columns=["hh_ts", "poa_interval_kwh_m2", "poa_wm2"])
+
+        return _hourly_weather_records_to_half_hourly_df(records)
+
+
+class OpenMeteoForecastIrradianceFetcher:
+    def __init__(self, client: OpenMeteoClient | None = None) -> None:
+        self.client = client or OpenMeteoClient()
+
+    async def fetch_half_hourly(
+        self,
+        *,
+        latitude: float,
+        longitude: float,
+        timezone: str,
+        tilt_deg: float,
+        azimuth_deg: float,
+        site_name: str,
+    ) -> pd.DataFrame:
+        records = await self.client.fetch_forecast(
+            plant_name=site_name,
+            lat=latitude,
+            lon=longitude,
+            timezone=timezone,
+            tilt_deg=tilt_deg,
+            azimuth_deg=azimuth_deg,
+        )
+        return _hourly_weather_records_to_half_hourly_df(records)
+
+
+def _hourly_weather_records_to_half_hourly_df(records: list[Any]) -> pd.DataFrame:
+    if not records:
+        return pd.DataFrame(columns=["hh_ts", "poa_interval_kwh_m2", "poa_wm2"])
+
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        numeric_gti = _coerce_float(getattr(record, "gti_wm2", None))
+        if numeric_gti is None:
+            continue
+        hour_ts = pd.to_datetime(getattr(record, "timestamp", None), errors="coerce", utc=True)
+        if pd.isna(hour_ts):
+            continue
+        for offset_minutes in (0, 30):
+            hh_ts = hour_ts + pd.Timedelta(minutes=offset_minutes)
+            rows.append(
+                {
+                    "hh_ts": hh_ts,
+                    "poa_interval_kwh_m2": numeric_gti / 2000.0,
+                    "poa_wm2": numeric_gti,
+                }
+            )
+
+    if not rows:
+        return pd.DataFrame(columns=["hh_ts", "poa_interval_kwh_m2", "poa_wm2"])
+
+    return pd.DataFrame(rows).sort_values("hh_ts").reset_index(drop=True)
+
+
+class RepositoryDaylightMetricsFetcher:
+    def __init__(
+        self,
+        *,
+        plant_repository: PlantRepository | Any | None = None,
+        readings_repository: ReadingsRepository | Any | None = None,
+        site_location_service: SiteLocationService | Any | None = None,
+        archive_irradiance_fetcher: Any | None = None,
+        forecast_irradiance_fetcher: Any | None = None,
+        batch_fetcher=None,
+        irradiance_threshold_wm2: float = 75.0,
+        target_pr_ratio: float = TARGET_PR_ASSUMPTION,
+        runtime_today: date | None = None,
+    ) -> None:
+        self.plant_repository = plant_repository or PlantRepository()
+        self.readings_repository = readings_repository or ReadingsRepository()
+        try:
+            self.site_location_service = site_location_service or SiteLocationService()
+        except Exception:
+            self.site_location_service = site_location_service
+        self.archive_irradiance_fetcher = archive_irradiance_fetcher or OpenMeteoArchiveIrradianceFetcher()
+        self.forecast_irradiance_fetcher = forecast_irradiance_fetcher or OpenMeteoForecastIrradianceFetcher()
+        self.batch_fetcher = batch_fetcher or self._fetch_source_batch
+        self.irradiance_threshold_wm2 = irradiance_threshold_wm2
+        self.target_pr_ratio = target_pr_ratio
+        self.runtime_today = runtime_today or datetime.now(UTC).date()
+
+    async def get_day_metrics(
+        self,
+        identifier: str,
+        target_date: date,
+        capacity_kwp: float | None = None,
+        *,
+        asset_name: str = "",
+        match_name: str = "",
+        source: str = "",
+    ) -> dict[str, Any]:
+        metrics = {
+            "capacity_kwp": _coerce_float(capacity_kwp),
+            "irradiance_source": "",
+            "irradiance_device_id": "",
+            "irradiance_threshold_wm2": self.irradiance_threshold_wm2,
+            "daylight_hh_periods": 0,
+            "available_hh_periods": 0,
+            "availability_ratio": None,
+            "actual_daylight_kwh": None,
+            "expected_daylight_kwh": None,
+            "h_poa_daylight_kwh_m2": None,
+            "performance_ratio": None,
+            "irradiance_message": "",
+            "inverter_count": 0,
+            "inverters_reporting": 0,
+            "best_inverter_availability_ratio": None,
+            "worst_inverter_availability_ratio": None,
+            "inverter_availability_summary": "",
+            "inverter_availability_breakdown": [],
+        }
+
+        plant_uid = self._resolve_plant_uid(
+            source=source,
+            identifier=identifier,
+            match_name=match_name,
+            asset_name=asset_name,
+        )
+        irr_df = pd.DataFrame(columns=["hh_ts", "poa_interval_kwh_m2", "poa_wm2"])
+        if plant_uid:
+            irr_df = self._load_repo_poa_series(plant_uid, target_date)
+            if not irr_df.empty:
+                metrics["irradiance_source"] = "repo_solargis_weighted_poa"
+                metrics["irradiance_device_id"] = "POA:SOLARGIS:WEIGHTED"
+
+        if irr_df.empty:
+            location = self._resolve_site_location(match_name=match_name, asset_name=asset_name)
+            if location is not None:
+                irr_df = self.archive_irradiance_fetcher.fetch_half_hourly(
+                    target_date=target_date,
+                    latitude=float(location.latitude),
+                    longitude=float(location.longitude),
+                    timezone=str(location.timezone),
+                    tilt_deg=float(location.tilt_deg),
+                    azimuth_deg=float(location.azimuth_deg),
+                )
+                if not irr_df.empty:
+                    metrics["irradiance_source"] = "openmeteo_archive_gti"
+                    metrics["irradiance_device_id"] = location.name
+
+        if irr_df.empty:
+            metrics["irradiance_message"] = (
+                "No irradiance data found for the target day."
+                if plant_uid
+                else "No plant or site-location match found for irradiance lookup."
+            )
+            return metrics
+
+        daylight_df = irr_df[irr_df["poa_wm2"] > self.irradiance_threshold_wm2].copy()
+        if daylight_df.empty:
+            metrics["irradiance_message"] = "No daylight half-hours exceeded the irradiance threshold."
+            return metrics
+
+        metrics["daylight_hh_periods"] = int(len(daylight_df))
+        metrics["h_poa_daylight_kwh_m2"] = float(daylight_df["poa_interval_kwh_m2"].sum())
+
+        try:
+            batch = await self.batch_fetcher(source, identifier, target_date)
+        except Exception as exc:
+            metrics["irradiance_message"] = f"Generation fetch failed: {exc}"
+            return metrics
+
+        generation_by_inverter_df = self._summarise_generation_by_inverter_batch(batch)
+        daylight_hour_df = self._summarise_daylight_hours(daylight_df)
+        generation_df = self._summarise_generation_by_hour(generation_by_inverter_df)
+        merged = daylight_hour_df.merge(generation_df, on="hour_ts", how="left")
+        merged["energy_kwh"] = pd.to_numeric(merged["energy_kwh"], errors="coerce").fillna(0.0)
+
+        actual_daylight_kwh = float(merged["energy_kwh"].sum())
+        available_hh_periods = int((merged["energy_kwh"] > 0).sum())
+        metrics["actual_daylight_kwh"] = actual_daylight_kwh
+        metrics["available_hh_periods"] = available_hh_periods
+        metrics["availability_ratio"] = (
+            available_hh_periods / len(daylight_hour_df) if len(daylight_hour_df) else None
+        )
+        metrics["daylight_hh_periods"] = int(len(daylight_hour_df))
+
+        capacity = _coerce_float(capacity_kwp)
+        if capacity and metrics["h_poa_daylight_kwh_m2"] is not None:
+            expected_daylight_kwh = capacity * float(metrics["h_poa_daylight_kwh_m2"])
+            metrics["expected_daylight_kwh"] = expected_daylight_kwh
+            if expected_daylight_kwh > 0:
+                metrics["performance_ratio"] = actual_daylight_kwh / expected_daylight_kwh
+        else:
+            metrics["irradiance_message"] = "Missing capacity kWp for PR calculation."
+
+        metrics.update(
+            self._build_inverter_availability_metrics(
+                batch=batch,
+                daylight_df=daylight_df,
+                generation_by_inverter_df=generation_by_inverter_df,
+            )
+        )
+
+        return metrics
+
+    async def get_target_metrics(
+        self,
+        *,
+        reference_date: date,
+        capacity_kwp: float | None = None,
+        ppa_rate_gbp_mwh: float | None = None,
+        asset_name: str = "",
+        match_name: str = "",
+    ) -> dict[str, Any]:
+        metrics: dict[str, Any] = {
+            "ppa_rate_gbp_mwh": _coerce_float(ppa_rate_gbp_mwh),
+            "target_pr_assumption_ratio": self.target_pr_ratio,
+            "target_gen_yesterday_kwh": None,
+            "target_revenue_yesterday_gbp": None,
+            "target_weather_yesterday": "",
+            "target_gen_today_kwh": None,
+            "target_revenue_today_gbp": None,
+            "target_weather_today": "",
+            "target_gen_week_kwh": None,
+            "target_revenue_week_gbp": None,
+            "target_weather_week": "",
+            "target_revenue_message": "",
+        }
+
+        capacity = _coerce_float(capacity_kwp)
+        if capacity is None or capacity <= 0:
+            metrics["target_revenue_message"] = "Missing capacity kWp for target generation."
+            return metrics
+
+        location = self._resolve_site_location(match_name=match_name, asset_name=asset_name)
+        if location is None:
+            metrics["target_revenue_message"] = "No site-location match found for target generation."
+            return metrics
+
+        forecast_df = pd.DataFrame(columns=["hh_ts", "poa_interval_kwh_m2", "poa_wm2"])
+        week_start = reference_date - timedelta(days=reference_date.weekday())
+        week_end = week_start + timedelta(days=6)
+        if week_end >= self.runtime_today:
+            forecast_df = await self.forecast_irradiance_fetcher.fetch_half_hourly(
+                latitude=float(location.latitude),
+                longitude=float(location.longitude),
+                timezone=str(location.timezone),
+                tilt_deg=float(location.tilt_deg),
+                azimuth_deg=float(location.azimuth_deg),
+                site_name=str(location.name),
+            )
+
+        yesterday_date = reference_date - timedelta(days=1)
+        yesterday_gen, yesterday_source = self._compute_target_for_date(
+            target_date=yesterday_date,
+            location=location,
+            capacity_kwp=capacity,
+            forecast_df=forecast_df,
+        )
+        today_gen, today_source = self._compute_target_for_date(
+            target_date=reference_date,
+            location=location,
+            capacity_kwp=capacity,
+            forecast_df=forecast_df,
+        )
+
+        week_gen_total = 0.0
+        week_sources: set[str] = set()
+        for day_offset in range(7):
+            current_date = week_start + timedelta(days=day_offset)
+            day_gen, day_source = self._compute_target_for_date(
+                target_date=current_date,
+                location=location,
+                capacity_kwp=capacity,
+                forecast_df=forecast_df,
+            )
+            if day_gen is not None:
+                week_gen_total += day_gen
+            if day_source:
+                week_sources.add(day_source)
+
+        metrics["target_gen_yesterday_kwh"] = yesterday_gen
+        metrics["target_weather_yesterday"] = yesterday_source
+        metrics["target_gen_today_kwh"] = today_gen
+        metrics["target_weather_today"] = today_source
+        metrics["target_gen_week_kwh"] = week_gen_total
+        metrics["target_weather_week"] = "+".join(sorted(week_sources))
+
+        rate = _coerce_float(ppa_rate_gbp_mwh)
+        if rate is None:
+            metrics["target_revenue_message"] = "Missing PPA rate in asset register."
+            return metrics
+
+        if yesterday_gen is not None:
+            metrics["target_revenue_yesterday_gbp"] = (yesterday_gen / 1000.0) * rate
+        if today_gen is not None:
+            metrics["target_revenue_today_gbp"] = (today_gen / 1000.0) * rate
+        metrics["target_revenue_week_gbp"] = (week_gen_total / 1000.0) * rate
+        return metrics
+
+    def _resolve_plant_uid(
+        self,
+        *,
+        source: str,
+        identifier: str,
+        match_name: str,
+        asset_name: str,
+    ) -> str:
+        cleaned_identifier = _clean_identifier(identifier)
+        if source == "juggle" and ":" in cleaned_identifier:
+            return cleaned_identifier
+
+        for candidate in (match_name, asset_name):
+            if not candidate:
+                continue
+            plant = self.plant_repository.get_by_alias(candidate)
+            if plant and plant.get("plant_uid"):
+                return str(plant["plant_uid"]).strip()
+
+        all_plants = self.plant_repository.get_all()
+        if not isinstance(all_plants, pd.DataFrame) or all_plants.empty:
+            return ""
+
+        candidate_tokens = set(_normalise_key(match_name or asset_name).split())
+        if not candidate_tokens or "alias" not in all_plants.columns or "plant_uid" not in all_plants.columns:
+            return ""
+
+        best_uid = ""
+        best_score = 0.0
+        for _, plant in all_plants.iterrows():
+            alias = str(plant.get("alias", "")).strip()
+            plant_uid = str(plant.get("plant_uid", "")).strip()
+            alias_tokens = set(_normalise_key(alias).split())
+            if not alias_tokens or not plant_uid:
+                continue
+            score = len(candidate_tokens & alias_tokens) / max(len(candidate_tokens), len(alias_tokens))
+            if score > best_score:
+                best_score = score
+                best_uid = plant_uid
+        return best_uid if best_score >= 0.5 else ""
+
+    def _resolve_site_location(self, *, match_name: str, asset_name: str):
+        if self.site_location_service is None:
+            return None
+
+        for candidate in (match_name, asset_name):
+            if not candidate:
+                continue
+            site = self.site_location_service.get_site(candidate)
+            if site is not None:
+                return site
+
+        candidate_tokens = set(_normalise_key(match_name or asset_name).split())
+        if not candidate_tokens:
+            return None
+
+        best_site = None
+        best_score = 0.0
+        for site in self.site_location_service.get_all_sites():
+            site_tokens = set(_normalise_key(site.name).split())
+            if not site_tokens:
+                continue
+            score = len(candidate_tokens & site_tokens) / max(len(candidate_tokens), len(site_tokens))
+            if score > best_score:
+                best_score = score
+                best_site = site
+        return best_site if best_score >= 0.5 else None
+
+    def _compute_target_for_date(
+        self,
+        *,
+        target_date: date,
+        location: Any,
+        capacity_kwp: float,
+        forecast_df: pd.DataFrame,
+    ) -> tuple[float | None, str]:
+        weather_source = "archive" if target_date < self.runtime_today else "forecast"
+        if weather_source == "archive":
+            irr_df = self.archive_irradiance_fetcher.fetch_half_hourly(
+                target_date=target_date,
+                latitude=float(location.latitude),
+                longitude=float(location.longitude),
+                timezone=str(location.timezone),
+                tilt_deg=float(location.tilt_deg),
+                azimuth_deg=float(location.azimuth_deg),
+            )
+        else:
+            if forecast_df.empty:
+                return None, "forecast"
+            irr_df = forecast_df[
+                pd.to_datetime(forecast_df["hh_ts"], utc=True).dt.date == target_date
+            ].copy()
+
+        if irr_df.empty:
+            return None, weather_source
+
+        positive_df = irr_df[pd.to_numeric(irr_df["poa_wm2"], errors="coerce").fillna(0.0) > 0].copy()
+        if positive_df.empty:
+            return 0.0, weather_source
+        h_poa_kwh_m2 = float(pd.to_numeric(
+            positive_df["poa_interval_kwh_m2"], errors="coerce"
+        ).fillna(0.0).sum())
+        return capacity_kwp * h_poa_kwh_m2 * self.target_pr_ratio, weather_source
+
+    def _load_repo_poa_series(self, plant_uid: str, target_date: date) -> pd.DataFrame:
+        start = datetime.combine(target_date, time.min, tzinfo=UTC)
+        end = start + timedelta(days=1)
+        df = self.readings_repository.get_readings(
+            plant_uid=plant_uid,
+            start=start,
+            end=end,
+            device_id="POA:SOLARGIS:WEIGHTED",
+        )
+        if df.empty:
+            return pd.DataFrame(columns=["hh_ts", "poa_interval_kwh_m2", "poa_wm2"])
+
+        ts_col = "ts" if "ts" in df.columns else "timestamp"
+        poa_col = "poaIrradiance_value" if "poaIrradiance_value" in df.columns else ""
+        if not ts_col or not poa_col:
+            return pd.DataFrame(columns=["hh_ts", "poa_interval_kwh_m2", "poa_wm2"])
+
+        work = df[[ts_col, poa_col]].copy()
+        work[ts_col] = pd.to_datetime(work[ts_col], utc=True, errors="coerce")
+        work["poa_interval_kwh_m2"] = pd.to_numeric(work[poa_col], errors="coerce")
+        work = work.dropna(subset=[ts_col, "poa_interval_kwh_m2"])
+        if work.empty:
+            return pd.DataFrame(columns=["hh_ts", "poa_interval_kwh_m2", "poa_wm2"])
+
+        work["hh_ts"] = work[ts_col].dt.floor("30min")
+        grouped = (
+            work.groupby("hh_ts", as_index=False)["poa_interval_kwh_m2"]
+            .mean()
+            .sort_values("hh_ts")
+        )
+        grouped["poa_wm2"] = grouped["poa_interval_kwh_m2"] * 2000.0
+        return grouped
+
+    def _summarise_generation_batch(self, batch) -> pd.DataFrame:  # noqa: ANN001
+        work = self._summarise_generation_by_inverter_batch(batch)
+        if work.empty:
+            return pd.DataFrame(columns=["hh_ts", "energy_kwh"])
+        return work.groupby("hh_ts", as_index=False)["energy_kwh"].sum().sort_values("hh_ts")
+
+    def _summarise_daylight_hours(self, daylight_df: pd.DataFrame) -> pd.DataFrame:
+        if daylight_df.empty:
+            return pd.DataFrame(columns=["hour_ts"])
+
+        work = daylight_df.copy()
+        work["hour_ts"] = pd.to_datetime(work["hh_ts"], utc=True, errors="coerce").dt.floor("h")
+        work = work.dropna(subset=["hour_ts"])
+        if work.empty:
+            return pd.DataFrame(columns=["hour_ts"])
+
+        return work[["hour_ts"]].drop_duplicates().sort_values("hour_ts").reset_index(drop=True)
+
+    def _summarise_generation_by_hour(self, generation_df: pd.DataFrame) -> pd.DataFrame:
+        if generation_df.empty:
+            return pd.DataFrame(columns=["hour_ts", "energy_kwh"])
+
+        work = generation_df.copy()
+        work["hour_ts"] = pd.to_datetime(work["hh_ts"], utc=True, errors="coerce").dt.floor("h")
+        work = work.dropna(subset=["hour_ts"])
+        if work.empty:
+            return pd.DataFrame(columns=["hour_ts", "energy_kwh"])
+
+        return (
+            work.groupby("hour_ts", as_index=False)["energy_kwh"]
+            .sum()
+            .sort_values("hour_ts")
+        )
+
+    def _summarise_generation_by_inverter_hour(self, generation_by_inverter_df: pd.DataFrame) -> pd.DataFrame:
+        if generation_by_inverter_df.empty:
+            return pd.DataFrame(columns=["hour_ts", "device_id", "energy_kwh"])
+
+        work = generation_by_inverter_df.copy()
+        work["hour_ts"] = pd.to_datetime(work["hh_ts"], utc=True, errors="coerce").dt.floor("h")
+        work = work.dropna(subset=["hour_ts"])
+        if work.empty:
+            return pd.DataFrame(columns=["hour_ts", "device_id", "energy_kwh"])
+
+        return (
+            work.groupby(["hour_ts", "device_id"], as_index=False)["energy_kwh"]
+            .sum()
+            .sort_values(["hour_ts", "device_id"])
+        )
+
+    def _summarise_generation_by_inverter_batch(self, batch) -> pd.DataFrame:  # noqa: ANN001
+        readings = list(getattr(batch, "readings", []) or [])
+        if not readings:
+            return pd.DataFrame(columns=["hh_ts", "device_id", "energy_kwh"])
+
+        rows: list[dict[str, Any]] = []
+        for reading in readings:
+            power_kw = _coerce_float(getattr(reading, "power_kw", None))
+            energy_kwh = _coerce_float(getattr(reading, "energy_kwh", None))
+            interval_seconds = _coerce_float(getattr(reading, "interval_seconds", None)) or 900.0
+            interval_hours = interval_seconds / 3600.0
+            timestamp = pd.to_datetime(getattr(reading, "timestamp", None), utc=True, errors="coerce")
+            if pd.isna(timestamp):
+                continue
+
+            interval_kwh = None
+            if power_kw is not None and power_kw > 0:
+                interval_kwh = power_kw * interval_hours
+            elif energy_kwh is not None and energy_kwh > 0:
+                interval_kwh = energy_kwh
+
+            raw_payload = getattr(reading, "raw_payload", None) or {}
+            cumulative_wh = None
+            for field_name in ("importEnergy", "exportEnergy"):
+                raw_counter = raw_payload.get(field_name)
+                if isinstance(raw_counter, dict):
+                    counter_value = _coerce_float(raw_counter.get("value"))
+                    if counter_value is not None:
+                        cumulative_wh = counter_value
+                        break
+
+            rows.append(
+                {
+                    "hh_ts": timestamp.floor("30min"),
+                    "ts": timestamp,
+                    "device_id": getattr(reading, "device_id", ""),
+                    "energy_kwh": float(interval_kwh) if interval_kwh is not None else None,
+                    "cumulative_wh": cumulative_wh,
+                }
+            )
+
+        if not rows:
+            return pd.DataFrame(columns=["hh_ts", "device_id", "energy_kwh"])
+
+        work = pd.DataFrame(rows)
+        work = work.sort_values(["device_id", "ts"]).reset_index(drop=True)
+        work["cumulative_wh"] = pd.to_numeric(work["cumulative_wh"], errors="coerce")
+        work["derived_energy_kwh"] = work["energy_kwh"]
+
+        for device_id, index in work.groupby("device_id").groups.items():
+            device_rows = work.loc[index]
+            deltas = device_rows["cumulative_wh"].diff()
+            derived = deltas.where(deltas > 0) / 1000.0
+            mask = device_rows["derived_energy_kwh"].isna()
+            work.loc[index, "derived_energy_kwh"] = device_rows["derived_energy_kwh"].where(
+                ~mask,
+                derived,
+            )
+
+        work["derived_energy_kwh"] = pd.to_numeric(
+            work["derived_energy_kwh"], errors="coerce"
+        ).fillna(0.0)
+        work = work[work["derived_energy_kwh"] > 0]
+        if work.empty:
+            return pd.DataFrame(columns=["hh_ts", "device_id", "energy_kwh"])
+
+        return (
+            work.groupby(["hh_ts", "device_id"], as_index=False)["derived_energy_kwh"]
+            .sum()
+            .rename(columns={"derived_energy_kwh": "energy_kwh"})
+            .sort_values(["hh_ts", "device_id"])
+        )
+
+    def _build_inverter_availability_metrics(
+        self,
+        *,
+        batch,
+        daylight_df: pd.DataFrame,
+        generation_by_inverter_df: pd.DataFrame,
+    ) -> dict[str, Any]:  # noqa: ANN001
+        device_ids = sorted(
+            {
+                str(getattr(reading, "device_id", "")).strip()
+                for reading in list(getattr(batch, "readings", []) or [])
+                if str(getattr(reading, "device_id", "")).strip()
+            }
+        )
+        if not device_ids or daylight_df.empty:
+            return {
+                "inverter_count": len(device_ids),
+                "inverters_reporting": 0,
+                "best_inverter_availability_ratio": None,
+                "worst_inverter_availability_ratio": None,
+                "inverter_availability_summary": "",
+                "inverter_availability_breakdown": [],
+            }
+
+        daylight_hour_df = self._summarise_daylight_hours(daylight_df)
+        daylight_periods = int(len(daylight_hour_df))
+        generation_by_inverter_hour_df = self._summarise_generation_by_inverter_hour(
+            generation_by_inverter_df
+        )
+        breakdown: list[dict[str, Any]] = []
+        for device_id in device_ids:
+            device_df = (
+                generation_by_inverter_hour_df[
+                    generation_by_inverter_hour_df["device_id"] == device_id
+                ].copy()
+                if not generation_by_inverter_hour_df.empty
+                else pd.DataFrame(columns=["hour_ts", "energy_kwh"])
+            )
+            merged = daylight_hour_df[["hour_ts"]].merge(
+                device_df[["hour_ts", "energy_kwh"]],
+                on="hour_ts",
+                how="left",
+            )
+            merged["energy_kwh"] = pd.to_numeric(merged["energy_kwh"], errors="coerce").fillna(0.0)
+            available_hh_periods = int((merged["energy_kwh"] > 0).sum())
+            availability_ratio = available_hh_periods / daylight_periods if daylight_periods else 0.0
+            actual_daylight_kwh = float(merged["energy_kwh"].sum())
+            breakdown.append(
+                {
+                    "device_id": device_id,
+                    "daylight_hh_periods": daylight_periods,
+                    "available_hh_periods": available_hh_periods,
+                    "availability_ratio": availability_ratio,
+                    "actual_daylight_kwh": actual_daylight_kwh,
+                }
+            )
+
+        best_ratio = max((item["availability_ratio"] for item in breakdown), default=None)
+        worst_ratio = min((item["availability_ratio"] for item in breakdown), default=None)
+        summary = "; ".join(
+            f"{item['device_id']} {item['availability_ratio'] * 100:.1f}% "
+            f"({item['available_hh_periods']}/{item['daylight_hh_periods']})"
+            for item in breakdown
+        )
+
+        return {
+            "inverter_count": len(device_ids),
+            "inverters_reporting": sum(1 for item in breakdown if item["available_hh_periods"] > 0),
+            "best_inverter_availability_ratio": best_ratio,
+            "worst_inverter_availability_ratio": worst_ratio,
+            "inverter_availability_summary": summary,
+            "inverter_availability_breakdown": breakdown,
+        }
+
+    async def _fetch_source_batch(self, source: str, identifier: str, target_date: date):  # noqa: ANN001
+        start = datetime.combine(target_date, time.min, tzinfo=UTC)
+        end = start + timedelta(days=1)
+
+        if source == "juggle":
+            from solar_platform.ingestion.emig_adapter import EMIGAdapter
+
+            return await EMIGAdapter().fetch_readings(identifier, start, end)
+
+        if source == "solaredge":
+            site_id = _clean_identifier(identifier)
+            api_key = _load_solaredge_site_keys().get(site_id)
+            if not api_key:
+                raise RuntimeError("missing site-specific API key in SOLAREDGE_KEYS_JSON")
+            from solar_platform.ingestion.solaredge_adapter import SolarEdgeAdapter
+
+            base_url = os.getenv("SOLAREDGE_API_URL", "https://monitoringapi.solaredge.com")
+            return await SolarEdgeAdapter(api_key=api_key, base_url=base_url).fetch_readings(site_id, start, end)
+
+        raise RuntimeError(f"Daylight metrics do not support source '{source}'.")
+
+
 class AssetRegisterAuditService:
     def __init__(
         self,
@@ -783,18 +1679,38 @@ class AssetRegisterAuditService:
         legacy_mapping_path: Path | None = None,
         checkers: dict[str, DailyDataChecker] | None = None,
         supported_sources: tuple[str, ...] = SUPPORTED_SOURCES,
+        daylight_metrics_fetcher: Any | None = None,
+        juggle_daylight_metrics_fetcher: Any | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.notion_service = notion_service or NotionAssetRegisterService(settings=self.settings)
         self.legacy_mapping = _load_legacy_mapping(legacy_mapping_path or _default_legacy_mapping_path())
         self.checkers = checkers or build_default_checkers()
         self.supported_sources = supported_sources
+        self.daylight_metrics_fetcher = (
+            daylight_metrics_fetcher
+            or juggle_daylight_metrics_fetcher
+            or RepositoryDaylightMetricsFetcher()
+        )
 
     @staticmethod
     def confirmed_data_source_matches() -> dict[str, str]:
         return dict(DEFAULT_DATA_SOURCE_MATCH_UPDATES)
 
     def get_assets_with_past_pac_date(
+        self,
+        as_of_date: date | None = None,
+        force_refresh: bool = False,
+        asset_filter: str | None = None,
+    ) -> list[dict[str, Any]]:
+        rows = self.get_assets_for_daily_audit(
+            as_of_date=as_of_date,
+            force_refresh=force_refresh,
+            asset_filter=asset_filter,
+        )
+        return [row for row in rows if row.get("_pac_phase") == "post_pac"]
+
+    def get_assets_for_daily_audit(
         self,
         as_of_date: date | None = None,
         force_refresh: bool = False,
@@ -808,10 +1724,9 @@ class AssetRegisterAuditService:
         for row in rows:
             pac_value = _get_value(row, PAC_DATE_FIELD_CANDIDATES)
             pac_date = _coerce_date(pac_value)
-            if pac_date is None or pac_date >= today:
-                continue
             enriched = dict(row)
             enriched["_pac_date"] = pac_date
+            enriched["_pac_phase"] = _derive_pac_phase(pac_date, today)
             if asset_filter_key:
                 haystacks = (
                     _extract_asset_name(enriched),
@@ -1034,7 +1949,7 @@ class AssetRegisterAuditService:
     ) -> list[dict[str, Any]]:
         today = reference_date or datetime.now(UTC).date()
         target_date = today - timedelta(days=1)
-        assets = self.get_assets_with_past_pac_date(
+        assets = self.get_assets_for_daily_audit(
             as_of_date=today,
             force_refresh=force_refresh,
             asset_filter=asset_filter,
@@ -1044,6 +1959,9 @@ class AssetRegisterAuditService:
         for asset in assets:
             asset_name = _extract_asset_name(asset)
             pac_date = asset.get("_pac_date")
+            pac_phase = str(asset.get("_pac_phase", _derive_pac_phase(pac_date, today)))
+            capacity_kwp = _extract_capacity_kwp(asset)
+            ppa_rate_gbp_mwh, ppa_rate_source = _extract_ppa_rate_gbp_mwh(asset)
             resolution = self._resolve_match(asset)
             identifiers = self._infer_identifiers(asset, resolution)
             candidate_sources = self._infer_candidate_sources(asset, identifiers, resolution)
@@ -1080,6 +1998,9 @@ class AssetRegisterAuditService:
                 "asset_name": asset_name,
                 "target_date": target_date.isoformat(),
                 "pac_date": pac_date.isoformat() if isinstance(pac_date, date) else "",
+                "pac_phase": pac_phase,
+                "pac_in_past": pac_phase == "post_pac",
+                "pac_date_missing": pac_phase == "unknown",
                 "notion_page_id": asset.get("notion_page_id", ""),
                 "notion_url": asset.get("notion_url", ""),
                 "match_name": resolution.match_name,
@@ -1087,8 +2008,59 @@ class AssetRegisterAuditService:
                 "match_confidence": resolution.match_confidence,
                 "resolved_source_types": ",".join(sorted(identifiers)),
                 "resolution_notes": resolution.resolution_notes,
+                "capacity_kwp": capacity_kwp,
+                "ppa_rate_gbp_mwh": ppa_rate_gbp_mwh,
+                "ppa_rate_source": ppa_rate_source,
+                "target_pr_assumption_ratio": TARGET_PR_ASSUMPTION,
+                "target_gen_yesterday_kwh": None,
+                "target_revenue_yesterday_gbp": None,
+                "target_weather_yesterday": "",
+                "target_gen_today_kwh": None,
+                "target_revenue_today_gbp": None,
+                "target_weather_today": "",
+                "target_gen_week_kwh": None,
+                "target_revenue_week_gbp": None,
+                "target_weather_week": "",
+                "target_revenue_message": "",
+                "curtailment_event_type": "",
+                "curtailment_generation_loss_kwh": None,
+                "curtailment_revenue_loss_gbp": None,
+                "curtailment_confidence": None,
+                "curtailment_message": "",
+                "irradiance_source": "",
+                "irradiance_device_id": "",
+                "irradiance_threshold_wm2": None,
+                "daylight_hh_periods": 0,
+                "available_hh_periods": 0,
+                "availability_ratio": None,
+                "actual_daylight_kwh": None,
+                "expected_daylight_kwh": None,
+                "h_poa_daylight_kwh_m2": None,
+                "performance_ratio": None,
+                "irradiance_message": "",
+                "inverter_count": 0,
+                "inverters_reporting": 0,
+                "best_inverter_availability_ratio": None,
+                "worst_inverter_availability_ratio": None,
+                "inverter_availability_summary": "",
+                "inverter_availability_breakdown": [],
             }
             row.update(_extract_asset_context(asset))
+
+            if self.daylight_metrics_fetcher is not None:
+                target_metrics_getter = getattr(self.daylight_metrics_fetcher, "get_target_metrics", None)
+                if callable(target_metrics_getter):
+                    target_metrics = target_metrics_getter(
+                        reference_date=today,
+                        capacity_kwp=capacity_kwp,
+                        ppa_rate_gbp_mwh=ppa_rate_gbp_mwh,
+                        asset_name=asset_name,
+                        match_name=resolution.match_name,
+                    )
+                    if inspect.isawaitable(target_metrics):
+                        target_metrics = await target_metrics
+                    if isinstance(target_metrics, dict):
+                        row.update(target_metrics)
 
             sources_with_data: list[str] = []
             for source in self.supported_sources:
@@ -1113,6 +2085,43 @@ class AssetRegisterAuditService:
             row["sources_with_data"] = ",".join(sources_with_data)
             row["has_any_data"] = bool(sources_with_data)
             row["preferred_source"] = sources_with_data[0] if sources_with_data else ""
+            if row["has_any_data"] and self.daylight_metrics_fetcher is not None:
+                identifier = identifiers.get(row["preferred_source"], "")
+                metrics = self.daylight_metrics_fetcher.get_day_metrics(
+                    identifier,
+                    target_date,
+                    capacity_kwp=capacity_kwp,
+                    asset_name=asset_name,
+                    match_name=resolution.match_name,
+                    source=row["preferred_source"],
+                )
+                if inspect.isawaitable(metrics):
+                    metrics = await metrics
+                if isinstance(metrics, dict):
+                    row.update(metrics)
+
+            expected_daylight_kwh = _coerce_float(row.get("expected_daylight_kwh"))
+            actual_daylight_kwh = _coerce_float(row.get("actual_daylight_kwh"))
+            ppa_rate = _coerce_float(row.get("ppa_rate_gbp_mwh"))
+            if (
+                row.get("has_any_data")
+                and expected_daylight_kwh is not None
+                and actual_daylight_kwh is not None
+                and expected_daylight_kwh > actual_daylight_kwh
+            ):
+                generation_loss_kwh = expected_daylight_kwh - actual_daylight_kwh
+                row["curtailment_event_type"] = "curtailment_candidate"
+                row["curtailment_generation_loss_kwh"] = generation_loss_kwh
+                row["curtailment_revenue_loss_gbp"] = (
+                    (generation_loss_kwh / 1000.0) * ppa_rate
+                    if ppa_rate is not None
+                    else None
+                )
+                row["curtailment_confidence"] = 0.6
+                row["curtailment_message"] = (
+                    "Estimated from daylight expected-vs-actual generation gap; "
+                    "controller state is not confirmed in the daily asset audit."
+                )
             rows.append(row)
 
         return rows
@@ -1132,6 +2141,8 @@ class AssetRegisterAuditService:
 
         triage_records: list[dict[str, Any]] = []
         for row in dataset:
+            if row.get("pac_phase") != "post_pac":
+                continue
             assessment = _assess_triage_issue(row)
             if not include_healthy and assessment.issue_type == "healthy_data_present":
                 continue
@@ -1185,6 +2196,147 @@ class AssetRegisterAuditService:
             )
 
         return triage_records
+
+    def publish_daily_dataset_to_notion(
+        self,
+        dataset: list[dict[str, Any]],
+        *,
+        database_id: str | None = None,
+        parent_page_id: str | None = None,
+        database_title: str = DAILY_JSON_DATABASE_TITLE,
+        only_with_data: bool = True,
+    ) -> dict[str, Any]:
+        rows_to_publish = [
+            row for row in dataset if row.get("has_any_data")
+        ] if only_with_data else list(dataset)
+        target_database_id = str(database_id or "").strip()
+        if not target_database_id:
+            target_database_id = self.notion_service.ensure_database(
+                database_title,
+                DAILY_JSON_DATABASE_PROPERTIES,
+                parent_page_id=parent_page_id,
+            ) or ""
+        if not target_database_id:
+            return {"database_id": None, "published": 0, "failed": len(rows_to_publish)}
+        self.notion_service.ensure_database_properties(target_database_id, DAILY_JSON_DATABASE_PROPERTIES)
+
+        published = 0
+        failed = 0
+        for row in rows_to_publish:
+            row_key = f"{row.get('target_date', '')}|{row.get('asset_name', '')}"
+            properties = {
+                "Asset": _title_property(row.get("asset_name")),
+                "Row Key": _text_property(row_key),
+                "Target Date": _date_property(row.get("target_date")),
+                "PAC Date": _date_property(row.get("pac_date")),
+                "PAC Phase": _text_property(row.get("pac_phase")),
+                "PAC In Past": {"checkbox": bool(row.get("pac_in_past"))},
+                "PAC Date Missing": {"checkbox": bool(row.get("pac_date_missing"))},
+                "Has Any Data": {"checkbox": bool(row.get("has_any_data"))},
+                "Sources With Data": _text_property(row.get("sources_with_data")),
+                "Preferred Source": _text_property(row.get("preferred_source")),
+                "Checked Sources": _text_property(row.get("checked_sources")),
+                "Match Name": _text_property(row.get("match_name")),
+                "Match Method": _text_property(row.get("match_method")),
+                "Match Confidence": {"number": float(row.get("match_confidence", 0.0) or 0.0)},
+                "Resolved Source Types": _text_property(row.get("resolved_source_types")),
+                "Resolution Notes": _text_property(row.get("resolution_notes")),
+                "Project Name": _text_property(row.get("project_name")),
+                "Customer": _text_property(row.get("customer_name")),
+                "SPV": _text_property(row.get("spv")),
+                "Priority": _text_property(row.get("priority")),
+                "Site Address": _text_property(row.get("site_address")),
+                "AM Contact": _text_property(row.get("am_contact_name")),
+                "AM Contact Email": {"email": str(row.get("am_contact_email", "")).strip() or None},
+                "Notion Page ID": _text_property(row.get("notion_page_id")),
+                "Asset Register URL": {"url": str(row.get("notion_url", "")).strip() or None},
+                "Capacity kWp": _number_property(row.get("capacity_kwp")),
+                "PPA Rate (GBP/MWh)": _number_property(row.get("ppa_rate_gbp_mwh")),
+                "PPA Rate Source": _text_property(row.get("ppa_rate_source")),
+                "Target PR Assumption (%)": _number_property(row.get("target_pr_assumption_ratio")),
+                "Target Gen Yesterday (kWh)": _number_property(row.get("target_gen_yesterday_kwh")),
+                "Target Revenue Yesterday (£)": _number_property(row.get("target_revenue_yesterday_gbp")),
+                "Target Weather Yesterday": _text_property(row.get("target_weather_yesterday")),
+                "Target Gen Today (kWh)": _number_property(row.get("target_gen_today_kwh")),
+                "Target Revenue Today (£)": _number_property(row.get("target_revenue_today_gbp")),
+                "Target Weather Today": _text_property(row.get("target_weather_today")),
+                "Target Gen Week (kWh)": _number_property(row.get("target_gen_week_kwh")),
+                "Target Revenue Week (£)": _number_property(row.get("target_revenue_week_gbp")),
+                "Target Weather Week": _text_property(row.get("target_weather_week")),
+                "Target Revenue Message": _text_property(row.get("target_revenue_message")),
+                "Curtailment Event Type": _text_property(row.get("curtailment_event_type")),
+                "Curtailment Generation Loss (kWh)": _number_property(row.get("curtailment_generation_loss_kwh")),
+                "Curtailment Revenue Loss (£)": _number_property(row.get("curtailment_revenue_loss_gbp")),
+                "Curtailment Confidence": _number_property(row.get("curtailment_confidence")),
+                "Curtailment Message": _text_property(row.get("curtailment_message")),
+                "Irradiance Source": _text_property(row.get("irradiance_source")),
+                "Irradiance Device ID": _text_property(row.get("irradiance_device_id")),
+                "Irradiance Threshold W/m2": _number_property(row.get("irradiance_threshold_wm2")),
+                "Daylight HH Periods": _number_property(row.get("daylight_hh_periods")),
+                "Available HH Periods": _number_property(row.get("available_hh_periods")),
+                "Availability (%)": _number_property(row.get("availability_ratio")),
+                "Actual Daylight (kWh)": _number_property(row.get("actual_daylight_kwh")),
+                "Expected Daylight (kWh)": _number_property(row.get("expected_daylight_kwh")),
+                "H POA Daylight (kWh/m2)": _number_property(row.get("h_poa_daylight_kwh_m2")),
+                "PR (%)": _number_property(row.get("performance_ratio")),
+                "Irradiance Message": _text_property(row.get("irradiance_message")),
+                "Inverter Count": _number_property(row.get("inverter_count")),
+                "Inverters Reporting": _number_property(row.get("inverters_reporting")),
+                "Best Inverter Availability (%)": _number_property(row.get("best_inverter_availability_ratio")),
+                "Worst Inverter Availability (%)": _number_property(row.get("worst_inverter_availability_ratio")),
+                "Inverter Availability Summary": _text_property(row.get("inverter_availability_summary")),
+                "Inverter Availability Breakdown": _text_property(
+                    json.dumps(row.get("inverter_availability_breakdown", []), sort_keys=True)
+                ),
+                "Juggle Identifier": _text_property(row.get("juggle_identifier")),
+                "Juggle Status": _text_property(row.get("juggle_status")),
+                "Juggle Has Data": {"checkbox": bool(row.get("juggle_has_data"))},
+                "Juggle Sample Count": {"number": float(row.get("juggle_sample_count", 0) or 0)},
+                "Juggle Message": _text_property(row.get("juggle_message")),
+                "SolarEdge Identifier": _text_property(row.get("solaredge_identifier")),
+                "SolarEdge Status": _text_property(row.get("solaredge_status")),
+                "SolarEdge Has Data": {"checkbox": bool(row.get("solaredge_has_data"))},
+                "SolarEdge Sample Count": {"number": float(row.get("solaredge_sample_count", 0) or 0)},
+                "SolarEdge Message": _text_property(row.get("solaredge_message")),
+                "Solis Identifier": _text_property(row.get("solis_identifier")),
+                "Solis Status": _text_property(row.get("solis_status")),
+                "Solis Has Data": {"checkbox": bool(row.get("solis_has_data"))},
+                "Solis Sample Count": {"number": float(row.get("solis_sample_count", 0) or 0)},
+                "Solis Message": _text_property(row.get("solis_message")),
+                "Enphase Identifier": _text_property(row.get("enphase_identifier")),
+                "Enphase Status": _text_property(row.get("enphase_status")),
+                "Enphase Has Data": {"checkbox": bool(row.get("enphase_has_data"))},
+                "Enphase Sample Count": {"number": float(row.get("enphase_sample_count", 0) or 0)},
+                "Enphase Message": _text_property(row.get("enphase_message")),
+                "Huawei Identifier": _text_property(row.get("huawei_identifier")),
+                "Huawei Status": _text_property(row.get("huawei_status")),
+                "Huawei Has Data": {"checkbox": bool(row.get("huawei_has_data"))},
+                "Huawei Sample Count": {"number": float(row.get("huawei_sample_count", 0) or 0)},
+                "Huawei Message": _text_property(row.get("huawei_message")),
+                "SMA Identifier": _text_property(row.get("sma_identifier")),
+                "SMA Status": _text_property(row.get("sma_status")),
+                "SMA Has Data": {"checkbox": bool(row.get("sma_has_data"))},
+                "SMA Sample Count": {"number": float(row.get("sma_sample_count", 0) or 0)},
+                "SMA Message": _text_property(row.get("sma_message")),
+                "Daily JSON": _text_property(json.dumps(row, sort_keys=True)),
+            }
+            page_id = self.notion_service.upsert_database_page(
+                database_id=target_database_id,
+                match_field="Row Key",
+                match_value=row_key,
+                properties=properties,
+            )
+            if page_id:
+                published += 1
+            else:
+                failed += 1
+
+        return {
+            "database_id": target_database_id,
+            "published": published,
+            "failed": failed,
+            "eligible_rows": len(rows_to_publish),
+        }
 
     def publish_triage_records_to_notion(
         self,
@@ -1313,4 +2465,38 @@ async def run_asset_register_triage_publish(
         "triage_json": str(triage_json_path),
         "publish_result": publish_result,
         "triage_records": triage_records,
+    }
+
+
+async def run_asset_register_daily_publish(
+    output_dir: Path,
+    reference_date: date | None = None,
+    force_refresh: bool = False,
+    asset_filter: str | None = None,
+    *,
+    database_id: str | None = None,
+    parent_page_id: str | None = None,
+) -> dict[str, Any]:
+    service = AssetRegisterAuditService()
+    dataset = await service.build_yesterday_dataset(
+        reference_date=reference_date,
+        force_refresh=force_refresh,
+        asset_filter=asset_filter,
+    )
+    target_date = (reference_date or datetime.now(UTC).date()) - timedelta(days=1)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    daily_json_path = output_dir / f"asset_daily_records_{target_date.isoformat()}.json"
+    daily_json_path.write_text(json.dumps(dataset, indent=2), encoding="utf-8")
+
+    publish_result = service.publish_daily_dataset_to_notion(
+        dataset,
+        database_id=database_id,
+        parent_page_id=parent_page_id,
+    )
+    return {
+        "target_date": target_date.isoformat(),
+        "rows": len(dataset),
+        "daily_json": str(daily_json_path),
+        "publish_result": publish_result,
+        "dataset": dataset,
     }

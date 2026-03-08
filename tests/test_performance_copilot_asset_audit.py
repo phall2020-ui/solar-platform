@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 
 
@@ -20,6 +21,7 @@ class FakeWritableNotionAssetRegisterService(FakeNotionAssetRegisterService):
         self.ensure_property = ensure_property
         self.updated_pages: list[tuple[str, dict[str, object]]] = []
         self.database_ensures: list[tuple[str, dict[str, object], str | None]] = []
+        self.database_property_ensures: list[tuple[str, dict[str, object]]] = []
         self.database_upserts: list[tuple[str, str, str, dict[str, object]]] = []
 
     def ensure_rich_text_property(self, property_name: str) -> bool:
@@ -37,6 +39,10 @@ class FakeWritableNotionAssetRegisterService(FakeNotionAssetRegisterService):
     ) -> str | None:
         self.database_ensures.append((title, properties, parent_page_id))
         return "db_triage"
+
+    def ensure_database_properties(self, database_id: str, properties: dict[str, object]) -> bool:
+        self.database_property_ensures.append((database_id, properties))
+        return True
 
     def upsert_database_page(
         self,
@@ -68,6 +74,89 @@ class FakeChecker:
             has_data=self.has_data,
             sample_count=96 if self.has_data else 0,
         )
+
+
+class FakeDaylightMetricsFetcher:
+    def __init__(
+        self,
+        metrics: dict[str, object] | None = None,
+        target_metrics: dict[str, object] | None = None,
+    ) -> None:
+        self.metrics = metrics or {}
+        self.target_metrics = target_metrics or {}
+        self.calls: list[tuple[str, date, float | None, dict[str, object]]] = []
+        self.target_calls: list[dict[str, object]] = []
+
+    def get_day_metrics(  # noqa: ANN001
+        self,
+        plant_uid: str,
+        target_date: date,
+        capacity_kwp: float | None = None,
+        **kwargs,
+    ):
+        self.calls.append((plant_uid, target_date, capacity_kwp, dict(kwargs)))
+        return dict(self.metrics)
+
+    async def get_target_metrics(self, **kwargs):  # noqa: ANN003
+        self.target_calls.append(dict(kwargs))
+        return dict(self.target_metrics)
+
+
+class FakePlantRepository:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self._rows = rows
+
+    def get_by_alias(self, alias: str):  # noqa: ANN001
+        for row in self._rows:
+            if row.get("alias") == alias:
+                return dict(row)
+        return None
+
+    def get_all(self) -> pd.DataFrame:
+        return pd.DataFrame(self._rows)
+
+
+class FakeReadingsRepository:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self._rows = rows
+        self.calls: list[tuple[str, str | None]] = []
+
+    def get_readings(self, plant_uid: str, start=None, end=None, device_id: str | None = None, limit=None):  # noqa: ANN001
+        self.calls.append((plant_uid, device_id))
+        df = pd.DataFrame(self._rows)
+        if not df.empty and device_id is not None and "emig_id" in df.columns:
+            df = df[df["emig_id"] == device_id].copy()
+        return df
+
+
+class FakeArchiveIrradianceFetcher:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+        self.calls: list[dict[str, object]] = []
+
+    def fetch_half_hourly(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return pd.DataFrame(self.rows)
+
+
+class FakeArchiveIrradianceFetcherByDate:
+    def __init__(self, rows_by_date: dict[date, list[dict[str, object]]]) -> None:
+        self.rows_by_date = rows_by_date
+        self.calls: list[dict[str, object]] = []
+
+    def fetch_half_hourly(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return pd.DataFrame(self.rows_by_date.get(kwargs["target_date"], []))
+
+
+class FakeForecastIrradianceFetcher:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+        self.calls: list[dict[str, object]] = []
+
+    async def fetch_half_hourly(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return pd.DataFrame(self.rows)
 
 
 def test_get_assets_with_past_pac_date_filters_future_and_missing_dates(tmp_path) -> None:
@@ -103,6 +192,121 @@ def test_get_assets_with_past_pac_date_filters_future_and_missing_dates(tmp_path
 
     assert [row["Alias"] for row in filtered_rows] == ["Dict Pac"]
 
+
+def test_get_assets_for_daily_audit_includes_all_rows_and_labels_pac_phase(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text("{}", encoding="utf-8")
+
+    notion = FakeNotionAssetRegisterService(
+        [
+            {"Alias": "Post PAC", "PAC Date": "2026-03-01", "Plant UID": "AMP:1"},
+            {"Alias": "Pre PAC", "PAC Date": "2026-03-20", "Plant UID": "AMP:2"},
+            {"Alias": "Unknown PAC", "Plant UID": "AMP:3"},
+        ]
+    )
+
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={},
+    )
+
+    rows = service.get_assets_for_daily_audit(as_of_date=date(2026, 3, 8))
+
+    assert [row["Alias"] for row in rows] == ["Post PAC", "Pre PAC", "Unknown PAC"]
+    assert [row["_pac_phase"] for row in rows] == ["post_pac", "pre_pac", "unknown"]
+
+
+@pytest.mark.asyncio
+async def test_build_yesterday_dataset_normalises_ppa_rate_to_gbp_per_mwh(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text("{}", encoding="utf-8")
+
+    notion = FakeNotionAssetRegisterService(
+        [
+            {
+                "Alias": "Cromwell Tools",
+                "PAC Date": "2026-03-01",
+                "PPA Rate (p/kWh)": "8.5",
+                "TIC kWp": "500",
+            },
+        ]
+    )
+
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={"juggle": FakeChecker("juggle", has_data=False, status="no_data")},
+        daylight_metrics_fetcher=FakeDaylightMetricsFetcher(),
+    )
+
+    dataset = await service.build_yesterday_dataset(reference_date=date(2026, 3, 8))
+    row = dataset[0]
+
+    assert row["ppa_rate_gbp_mwh"] == pytest.approx(85.0)
+    assert row["ppa_rate_source"] == "PPA Rate (p/kWh)"
+
+
+@pytest.mark.asyncio
+async def test_repository_daylight_metrics_fetcher_builds_target_generation_and_revenue() -> None:
+    from solar_platform.services.performance_copilot_asset_audit import RepositoryDaylightMetricsFetcher
+
+    archive_rows_by_date = {
+        date(2026, 3, 2): [{"hh_ts": "2026-03-02T12:00:00Z", "poa_interval_kwh_m2": 0.10, "poa_wm2": 200.0}],
+        date(2026, 3, 3): [{"hh_ts": "2026-03-03T12:00:00Z", "poa_interval_kwh_m2": 0.10, "poa_wm2": 200.0}],
+        date(2026, 3, 4): [{"hh_ts": "2026-03-04T12:00:00Z", "poa_interval_kwh_m2": 0.10, "poa_wm2": 200.0}],
+        date(2026, 3, 5): [{"hh_ts": "2026-03-05T12:00:00Z", "poa_interval_kwh_m2": 0.10, "poa_wm2": 200.0}],
+        date(2026, 3, 6): [{"hh_ts": "2026-03-06T12:00:00Z", "poa_interval_kwh_m2": 0.10, "poa_wm2": 200.0}],
+        date(2026, 3, 7): [{"hh_ts": "2026-03-07T12:00:00Z", "poa_interval_kwh_m2": 0.15, "poa_wm2": 300.0}],
+    }
+    forecast_rows = [
+        {"hh_ts": "2026-03-08T12:00:00Z", "poa_interval_kwh_m2": 0.20, "poa_wm2": 400.0},
+        {"hh_ts": "2026-03-09T12:00:00Z", "poa_interval_kwh_m2": 0.25, "poa_wm2": 500.0},
+    ]
+
+    fetcher = RepositoryDaylightMetricsFetcher(
+        plant_repository=FakePlantRepository([]),
+        readings_repository=FakeReadingsRepository([]),
+        site_location_service=SimpleNamespace(
+            get_site=lambda name: SimpleNamespace(
+                name=name,
+                latitude=53.0,
+                longitude=-2.0,
+                tilt_deg=20.0,
+                azimuth_deg=180.0,
+                timezone="Europe/London",
+            ),
+            get_all_sites=lambda: [],
+        ),
+        archive_irradiance_fetcher=FakeArchiveIrradianceFetcherByDate(archive_rows_by_date),
+        forecast_irradiance_fetcher=FakeForecastIrradianceFetcher(forecast_rows),
+        runtime_today=date(2026, 3, 8),
+    )
+
+    metrics = await fetcher.get_target_metrics(
+        reference_date=date(2026, 3, 8),
+        capacity_kwp=100.0,
+        ppa_rate_gbp_mwh=90.0,
+        asset_name="Park Hall",
+        match_name="PPA Park Hall",
+    )
+
+    assert metrics["target_pr_assumption_ratio"] == pytest.approx(0.8)
+    assert metrics["target_gen_yesterday_kwh"] == pytest.approx(12.0)
+    assert metrics["target_revenue_yesterday_gbp"] == pytest.approx(1.08)
+    assert metrics["target_weather_yesterday"] == "archive"
+    assert metrics["target_gen_today_kwh"] == pytest.approx(16.0)
+    assert metrics["target_revenue_today_gbp"] == pytest.approx(1.44)
+    assert metrics["target_weather_today"] == "forecast"
+    assert metrics["target_gen_week_kwh"] == pytest.approx(68.0)
+    assert metrics["target_revenue_week_gbp"] == pytest.approx(6.12)
+    assert metrics["target_weather_week"] == "archive+forecast"
 
 @pytest.mark.asyncio
 async def test_build_yesterday_dataset_uses_mapping_and_check_results(tmp_path) -> None:
@@ -147,6 +351,9 @@ async def test_build_yesterday_dataset_uses_mapping_and_check_results(tmp_path) 
     assert row["asset_name"] == "Blachford UK"
     assert row["target_date"] == "2026-03-07"
     assert row["pac_date"] == "2026-03-01"
+    assert row["pac_phase"] == "post_pac"
+    assert row["pac_in_past"] is True
+    assert row["pac_date_missing"] is False
     assert row["match_name"] == "Blachford UK"
     assert row["match_method"] == "exact_registry"
     assert row["match_confidence"] == pytest.approx(1.0)
@@ -159,6 +366,547 @@ async def test_build_yesterday_dataset_uses_mapping_and_check_results(tmp_path) 
     assert row["preferred_source"] == "juggle"
     assert juggle_checker.calls == [("AMP:00024", date(2026, 3, 7))]
     assert solaredge_checker.calls == [("4466155", date(2026, 3, 7))]
+
+
+@pytest.mark.asyncio
+async def test_build_yesterday_dataset_includes_unknown_pac_assets_with_data(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text(
+        """
+        {
+          "Cromwell Tools": {
+            "platform": "juggle",
+            "site_id": "",
+            "juggle_uid": "AMP:00001"
+          }
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    notion = FakeNotionAssetRegisterService([{"Alias": "Cromwell Tools"}])
+    juggle_checker = FakeChecker("juggle", has_data=True)
+
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={"juggle": juggle_checker},
+        supported_sources=("juggle",),
+    )
+
+    dataset = await service.build_yesterday_dataset(reference_date=date(2026, 3, 8))
+
+    assert len(dataset) == 1
+    row = dataset[0]
+    assert row["asset_name"] == "Cromwell Tools"
+    assert row["pac_phase"] == "unknown"
+    assert row["pac_date_missing"] is True
+    assert row["has_any_data"] is True
+    assert row["sources_with_data"] == "juggle"
+
+
+@pytest.mark.asyncio
+async def test_build_yesterday_dataset_attaches_juggle_daylight_metrics(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text(
+        """
+        {
+          "Newfold Farm": {
+            "platform": "juggle",
+            "site_id": "",
+            "juggle_uid": "ERS:00001"
+          }
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    notion = FakeNotionAssetRegisterService(
+        [
+            {
+                "Alias": "BAE Fylde",
+                "PAC Date": "2026-03-01",
+                "Data Source Match": "Newfold Farm",
+                "TIC kWp": 9630,
+            }
+        ]
+    )
+    juggle_checker = FakeChecker("juggle", has_data=True)
+    metrics_fetcher = FakeDaylightMetricsFetcher(
+        {
+            "capacity_kwp": 9630.0,
+            "irradiance_source": "juggle_weather_station",
+            "irradiance_device_id": "WETH:000274",
+            "irradiance_threshold_wm2": 75.0,
+            "daylight_hh_periods": 20,
+            "available_hh_periods": 18,
+            "availability_ratio": 0.9,
+            "actual_daylight_kwh": 5120.5,
+            "expected_daylight_kwh": 6400.0,
+            "h_poa_daylight_kwh_m2": 0.6646,
+            "performance_ratio": 0.800078125,
+            "irradiance_message": "",
+        }
+    )
+
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={"juggle": juggle_checker},
+        supported_sources=("juggle",),
+        juggle_daylight_metrics_fetcher=metrics_fetcher,
+    )
+
+    dataset = await service.build_yesterday_dataset(reference_date=date(2026, 3, 8))
+
+    row = dataset[0]
+    assert row["availability_ratio"] == pytest.approx(0.9)
+    assert row["performance_ratio"] == pytest.approx(0.800078125)
+    assert row["actual_daylight_kwh"] == pytest.approx(5120.5)
+    assert row["daylight_hh_periods"] == 20
+    assert row["available_hh_periods"] == 18
+    assert row["irradiance_device_id"] == "WETH:000274"
+    assert metrics_fetcher.calls == [
+        (
+            "ERS:00001",
+            date(2026, 3, 7),
+            9630.0,
+            {
+                "asset_name": "BAE Fylde",
+                "match_name": "Newfold Farm",
+                "source": "juggle",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_yesterday_dataset_includes_curtailment_generation_and_revenue_loss(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text(
+        """
+        {
+          "Newfold Farm": {
+            "platform": "juggle",
+            "site_id": "",
+            "juggle_uid": "ERS:00001"
+          }
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    notion = FakeNotionAssetRegisterService(
+        [
+            {
+                "Alias": "Newfold Farm",
+                "PAC Date": "2026-03-01",
+                "PPA Rate (GBP/MWh)": "85",
+                "TIC kWp": 500,
+            }
+        ]
+    )
+    juggle_checker = FakeChecker("juggle", has_data=True)
+    metrics_fetcher = FakeDaylightMetricsFetcher(
+        metrics={
+            "capacity_kwp": 500.0,
+            "irradiance_source": "juggle_weather_station",
+            "irradiance_device_id": "WETH:000274",
+            "irradiance_threshold_wm2": 75.0,
+            "daylight_hh_periods": 20,
+            "available_hh_periods": 18,
+            "availability_ratio": 0.9,
+            "actual_daylight_kwh": 100.0,
+            "expected_daylight_kwh": 120.0,
+            "h_poa_daylight_kwh_m2": 0.3,
+            "performance_ratio": 0.8333333333,
+            "irradiance_message": "",
+        }
+    )
+
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={"juggle": juggle_checker},
+        supported_sources=("juggle",),
+        daylight_metrics_fetcher=metrics_fetcher,
+    )
+
+    dataset = await service.build_yesterday_dataset(reference_date=date(2026, 3, 8))
+
+    row = dataset[0]
+    assert row["curtailment_event_type"] == "curtailment_candidate"
+    assert row["curtailment_generation_loss_kwh"] == pytest.approx(20.0)
+    assert row["curtailment_revenue_loss_gbp"] == pytest.approx(1.7)
+
+
+@pytest.mark.asyncio
+async def test_repository_daylight_metrics_fetcher_uses_repo_poa_and_any_kwh_availability() -> None:
+    from solar_platform.ingestion.base import Reading, ReadingBatch, ReadingQuality
+    from solar_platform.services.performance_copilot_asset_audit import RepositoryDaylightMetricsFetcher
+
+    plant_repo = FakePlantRepository(
+        [
+            {"alias": "PPA Park Hall", "plant_uid": "PLANT:00001"},
+        ]
+    )
+    readings_repo = FakeReadingsRepository(
+        [
+            {"ts": "2026-03-07T09:00:00Z", "emig_id": "POA:SOLARGIS:WEIGHTED", "poaIrradiance_value": 0.03},
+            {"ts": "2026-03-07T09:30:00Z", "emig_id": "POA:SOLARGIS:WEIGHTED", "poaIrradiance_value": 0.05},
+            {"ts": "2026-03-07T10:00:00Z", "emig_id": "POA:SOLARGIS:WEIGHTED", "poaIrradiance_value": 0.01},
+        ]
+    )
+
+    async def fake_batch_fetcher(source: str, identifier: str, target_date: date) -> ReadingBatch:
+        assert source == "solaredge"
+        assert identifier == "4667531"
+        assert target_date == date(2026, 3, 7)
+        return ReadingBatch(
+            source=source,
+            plant_uid=identifier,
+            readings=[
+                Reading(
+                    timestamp="2026-03-07T09:00:00Z",
+                    plant_uid=identifier,
+                    device_id="site",
+                    source=source,
+                    power_kw=10.0,
+                    interval_seconds=900,
+                    quality=ReadingQuality.MEASURED,
+                ),
+                Reading(
+                    timestamp="2026-03-07T09:15:00Z",
+                    plant_uid=identifier,
+                    device_id="site",
+                    source=source,
+                    power_kw=10.0,
+                    interval_seconds=900,
+                    quality=ReadingQuality.MEASURED,
+                ),
+                Reading(
+                    timestamp="2026-03-07T09:30:00Z",
+                    plant_uid=identifier,
+                    device_id="site",
+                    source=source,
+                    power_kw=0.0,
+                    interval_seconds=900,
+                    quality=ReadingQuality.MEASURED,
+                ),
+                Reading(
+                    timestamp="2026-03-07T09:45:00Z",
+                    plant_uid=identifier,
+                    device_id="site",
+                    source=source,
+                    power_kw=0.0,
+                    interval_seconds=900,
+                    quality=ReadingQuality.MEASURED,
+                ),
+            ],
+        ).finalize()
+
+    fetcher = RepositoryDaylightMetricsFetcher(
+        plant_repository=plant_repo,
+        readings_repository=readings_repo,
+        batch_fetcher=fake_batch_fetcher,
+    )
+
+    metrics = await fetcher.get_day_metrics(
+        "4667531",
+        date(2026, 3, 7),
+        capacity_kwp=100.0,
+        asset_name="Park Hall",
+        match_name="PPA Park Hall",
+        source="solaredge",
+    )
+
+    assert readings_repo.calls == [("PLANT:00001", "POA:SOLARGIS:WEIGHTED")]
+    assert metrics["irradiance_source"] == "repo_solargis_weighted_poa"
+    assert metrics["irradiance_device_id"] == "POA:SOLARGIS:WEIGHTED"
+    assert metrics["irradiance_threshold_wm2"] == pytest.approx(75.0)
+    assert metrics["daylight_hh_periods"] == 1
+    assert metrics["available_hh_periods"] == 1
+    assert metrics["availability_ratio"] == pytest.approx(1.0)
+    assert metrics["actual_daylight_kwh"] == pytest.approx(5.0)
+    assert metrics["h_poa_daylight_kwh_m2"] == pytest.approx(0.05)
+    assert metrics["expected_daylight_kwh"] == pytest.approx(5.0)
+    assert metrics["performance_ratio"] == pytest.approx(1.0)
+    assert metrics["inverter_count"] == 1
+    assert metrics["inverters_reporting"] == 1
+    assert metrics["best_inverter_availability_ratio"] == pytest.approx(1.0)
+    assert metrics["worst_inverter_availability_ratio"] == pytest.approx(1.0)
+    assert metrics["inverter_availability_breakdown"] == [
+        {
+            "device_id": "site",
+            "daylight_hh_periods": 1,
+            "available_hh_periods": 1,
+            "availability_ratio": 1.0,
+            "actual_daylight_kwh": pytest.approx(5.0),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_repository_daylight_metrics_fetcher_falls_back_to_archive_gti() -> None:
+    from solar_platform.ingestion.base import ReadingBatch
+    from solar_platform.services.performance_copilot_asset_audit import RepositoryDaylightMetricsFetcher
+
+    plant_repo = FakePlantRepository([{"alias": "PPA Park Hall", "plant_uid": "PLANT:00001"}])
+    readings_repo = FakeReadingsRepository([])
+    archive_fetcher = FakeArchiveIrradianceFetcher(
+        [
+            {
+                "hh_ts": pd.Timestamp("2026-03-07T09:00:00"),
+                "poa_interval_kwh_m2": 0.03,
+                "poa_wm2": 60.0,
+            },
+            {
+                "hh_ts": pd.Timestamp("2026-03-07T09:30:00"),
+                "poa_interval_kwh_m2": 0.04,
+                "poa_wm2": 80.0,
+            },
+        ]
+    )
+    site_locations = SimpleNamespace(
+        get_site=lambda name: None,
+        get_all_sites=lambda: [
+            SimpleNamespace(
+                name="PPA Park Hall",
+                latitude=53.082483,
+                longitude=-2.24856,
+                tilt_deg=10.0,
+                azimuth_deg=180.0,
+                timezone="Europe/London",
+            )
+        ],
+    )
+
+    async def fake_batch_fetcher(source: str, identifier: str, target_date: date) -> ReadingBatch:
+        return ReadingBatch(source=source, plant_uid=identifier, readings=[]).finalize()
+
+    fetcher = RepositoryDaylightMetricsFetcher(
+        plant_repository=plant_repo,
+        readings_repository=readings_repo,
+        site_location_service=site_locations,
+        archive_irradiance_fetcher=archive_fetcher,
+        batch_fetcher=fake_batch_fetcher,
+    )
+
+    metrics = await fetcher.get_day_metrics(
+        "4667531",
+        date(2026, 3, 7),
+        capacity_kwp=100.0,
+        asset_name="Park Hall",
+        match_name="PPA Park Hall",
+        source="solaredge",
+    )
+
+    assert metrics["irradiance_source"] == "openmeteo_archive_gti"
+    assert metrics["irradiance_device_id"] == "PPA Park Hall"
+    assert metrics["daylight_hh_periods"] == 1
+    assert metrics["available_hh_periods"] == 0
+    assert metrics["h_poa_daylight_kwh_m2"] == pytest.approx(0.04)
+    assert metrics["expected_daylight_kwh"] == pytest.approx(4.0)
+    assert metrics["performance_ratio"] == pytest.approx(0.0)
+    assert archive_fetcher.calls[0]["target_date"] == date(2026, 3, 7)
+
+
+def test_repository_daylight_metrics_fetcher_derives_energy_from_cumulative_import_energy() -> None:
+    from solar_platform.ingestion.base import Reading, ReadingBatch, ReadingQuality
+    from solar_platform.services.performance_copilot_asset_audit import RepositoryDaylightMetricsFetcher
+
+    batch = ReadingBatch(
+        source="juggle",
+        plant_uid="AMP:00032",
+        readings=[
+            Reading(
+                timestamp="2026-03-07T07:00:00Z",
+                plant_uid="AMP:00032",
+                device_id="INVERT:003287",
+                source="juggle",
+                power_kw=0.0,
+                interval_seconds=900,
+                quality=ReadingQuality.MEASURED,
+                raw_payload={"importEnergy": {"value": 22543301, "unit": "Wh"}},
+            ),
+            Reading(
+                timestamp="2026-03-07T07:15:00Z",
+                plant_uid="AMP:00032",
+                device_id="INVERT:003287",
+                source="juggle",
+                power_kw=0.0,
+                interval_seconds=900,
+                quality=ReadingQuality.MEASURED,
+                raw_payload={"importEnergy": {"value": 22543400, "unit": "Wh"}},
+            ),
+            Reading(
+                timestamp="2026-03-07T07:30:00Z",
+                plant_uid="AMP:00032",
+                device_id="INVERT:003287",
+                source="juggle",
+                power_kw=0.0,
+                interval_seconds=900,
+                quality=ReadingQuality.MEASURED,
+                raw_payload={"importEnergy": {"value": 22543801, "unit": "Wh"}},
+            ),
+        ],
+    ).finalize()
+
+    fetcher = RepositoryDaylightMetricsFetcher(
+        plant_repository=FakePlantRepository([]),
+        readings_repository=FakeReadingsRepository([]),
+    )
+
+    df = fetcher._summarise_generation_batch(batch)
+
+    assert len(df) == 2
+    assert df["energy_kwh"].sum() == pytest.approx(0.5)
+    assert df.iloc[0]["energy_kwh"] == pytest.approx(0.099)
+    assert df.iloc[1]["energy_kwh"] == pytest.approx(0.401)
+
+
+@pytest.mark.asyncio
+async def test_repository_daylight_metrics_fetcher_breaks_availability_down_by_inverter() -> None:
+    from solar_platform.ingestion.base import Reading, ReadingBatch, ReadingQuality
+    from solar_platform.services.performance_copilot_asset_audit import RepositoryDaylightMetricsFetcher
+
+    plant_repo = FakePlantRepository(
+        [
+            {"alias": "PPA Park Hall", "plant_uid": "PLANT:00001"},
+        ]
+    )
+    readings_repo = FakeReadingsRepository(
+        [
+            {"ts": "2026-03-07T09:00:00Z", "emig_id": "POA:SOLARGIS:WEIGHTED", "poaIrradiance_value": 0.05},
+            {"ts": "2026-03-07T09:30:00Z", "emig_id": "POA:SOLARGIS:WEIGHTED", "poaIrradiance_value": 0.05},
+        ]
+    )
+
+    async def fake_batch_fetcher(source: str, identifier: str, target_date: date) -> ReadingBatch:
+        return ReadingBatch(
+            source=source,
+            plant_uid=identifier,
+            readings=[
+                Reading(
+                    timestamp="2026-03-07T09:00:00Z",
+                    plant_uid=identifier,
+                    device_id="INV:A",
+                    source=source,
+                    power_kw=10.0,
+                    interval_seconds=900,
+                    quality=ReadingQuality.MEASURED,
+                ),
+                Reading(
+                    timestamp="2026-03-07T09:15:00Z",
+                    plant_uid=identifier,
+                    device_id="INV:A",
+                    source=source,
+                    power_kw=10.0,
+                    interval_seconds=900,
+                    quality=ReadingQuality.MEASURED,
+                ),
+                Reading(
+                    timestamp="2026-03-07T09:30:00Z",
+                    plant_uid=identifier,
+                    device_id="INV:A",
+                    source=source,
+                    power_kw=10.0,
+                    interval_seconds=900,
+                    quality=ReadingQuality.MEASURED,
+                ),
+                Reading(
+                    timestamp="2026-03-07T09:45:00Z",
+                    plant_uid=identifier,
+                    device_id="INV:A",
+                    source=source,
+                    power_kw=10.0,
+                    interval_seconds=900,
+                    quality=ReadingQuality.MEASURED,
+                ),
+                Reading(
+                    timestamp="2026-03-07T09:00:00Z",
+                    plant_uid=identifier,
+                    device_id="INV:B",
+                    source=source,
+                    power_kw=0.0,
+                    interval_seconds=900,
+                    quality=ReadingQuality.MEASURED,
+                ),
+                Reading(
+                    timestamp="2026-03-07T09:15:00Z",
+                    plant_uid=identifier,
+                    device_id="INV:B",
+                    source=source,
+                    power_kw=0.0,
+                    interval_seconds=900,
+                    quality=ReadingQuality.MEASURED,
+                ),
+                Reading(
+                    timestamp="2026-03-07T09:30:00Z",
+                    plant_uid=identifier,
+                    device_id="INV:B",
+                    source=source,
+                    power_kw=0.0,
+                    interval_seconds=900,
+                    quality=ReadingQuality.MEASURED,
+                ),
+                Reading(
+                    timestamp="2026-03-07T09:45:00Z",
+                    plant_uid=identifier,
+                    device_id="INV:B",
+                    source=source,
+                    power_kw=0.0,
+                    interval_seconds=900,
+                    quality=ReadingQuality.MEASURED,
+                ),
+            ],
+        ).finalize()
+
+    fetcher = RepositoryDaylightMetricsFetcher(
+        plant_repository=plant_repo,
+        readings_repository=readings_repo,
+        batch_fetcher=fake_batch_fetcher,
+    )
+
+    metrics = await fetcher.get_day_metrics(
+        "4667531",
+        date(2026, 3, 7),
+        capacity_kwp=100.0,
+        asset_name="Park Hall",
+        match_name="PPA Park Hall",
+        source="solaredge",
+    )
+
+    assert metrics["inverter_count"] == 2
+    assert metrics["inverters_reporting"] == 1
+    assert metrics["best_inverter_availability_ratio"] == pytest.approx(1.0)
+    assert metrics["worst_inverter_availability_ratio"] == pytest.approx(0.0)
+    assert metrics["inverter_availability_summary"] == "INV:A 100.0% (1/1); INV:B 0.0% (0/1)"
+    assert metrics["inverter_availability_breakdown"] == [
+        {
+            "device_id": "INV:A",
+            "daylight_hh_periods": 1,
+            "available_hh_periods": 1,
+            "availability_ratio": 1.0,
+            "actual_daylight_kwh": pytest.approx(10.0),
+        },
+        {
+            "device_id": "INV:B",
+            "daylight_hh_periods": 1,
+            "available_hh_periods": 0,
+            "availability_ratio": 0.0,
+            "actual_daylight_kwh": 0.0,
+        },
+    ]
 
 
 @pytest.mark.asyncio
@@ -213,6 +961,57 @@ async def test_build_yesterday_dataset_ignores_placeholder_juggle_identifier_whe
     assert row["has_any_data"] is True
     assert juggle_checker.calls == []
     assert solaredge_checker.calls == [("4667531", date(2026, 3, 7))]
+
+
+@pytest.mark.asyncio
+async def test_repository_daylight_metrics_fetcher_rolls_site_availability_up_to_hourly_basis() -> None:
+    from solar_platform.ingestion.base import Reading, ReadingBatch, ReadingQuality
+    from solar_platform.services.performance_copilot_asset_audit import RepositoryDaylightMetricsFetcher
+
+    plant_repo = FakePlantRepository([{"alias": "PPA Park Hall", "plant_uid": "PLANT:00001"}])
+    readings_repo = FakeReadingsRepository(
+        [
+            {"ts": "2026-03-07T09:00:00Z", "emig_id": "POA:SOLARGIS:WEIGHTED", "poaIrradiance_value": 0.04},
+            {"ts": "2026-03-07T09:30:00Z", "emig_id": "POA:SOLARGIS:WEIGHTED", "poaIrradiance_value": 0.04},
+        ]
+    )
+
+    async def fake_batch_fetcher(source: str, identifier: str, target_date: date) -> ReadingBatch:
+        return ReadingBatch(
+            source=source,
+            plant_uid=identifier,
+            readings=[
+                Reading(
+                    timestamp="2026-03-07T09:15:00Z",
+                    plant_uid=identifier,
+                    device_id="site",
+                    source=source,
+                    power_kw=20.0,
+                    interval_seconds=900,
+                    quality=ReadingQuality.MEASURED,
+                ),
+            ],
+        ).finalize()
+
+    fetcher = RepositoryDaylightMetricsFetcher(
+        plant_repository=plant_repo,
+        readings_repository=readings_repo,
+        batch_fetcher=fake_batch_fetcher,
+    )
+
+    metrics = await fetcher.get_day_metrics(
+        "4667531",
+        date(2026, 3, 7),
+        capacity_kwp=100.0,
+        asset_name="Park Hall",
+        match_name="PPA Park Hall",
+        source="solaredge",
+    )
+
+    assert metrics["daylight_hh_periods"] == 1
+    assert metrics["available_hh_periods"] == 1
+    assert metrics["availability_ratio"] == pytest.approx(1.0)
+    assert metrics["actual_daylight_kwh"] == pytest.approx(5.0)
 
 
 @pytest.mark.asyncio
@@ -523,6 +1322,48 @@ async def test_build_triage_records_creates_actionable_issue_and_email_draft(tmp
 
 
 @pytest.mark.asyncio
+async def test_build_triage_records_skips_pre_pac_assets(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text(
+        """
+        {
+          "PPA Park Hall": {
+            "platform": "solaredge",
+            "site_id": "4667531",
+            "juggle_uid": "?"
+          }
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    notion = FakeNotionAssetRegisterService(
+        [
+            {
+                "Alias": "Park Hall",
+                "PAC Date": "2026-03-20",
+                "Data Source Match": "PPA Park Hall",
+            },
+        ]
+    )
+    solaredge_checker = FakeChecker("solaredge", has_data=True)
+
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={"solaredge": solaredge_checker},
+        supported_sources=("solaredge",),
+    )
+
+    triage_records = await service.build_triage_records(reference_date=date(2026, 3, 8))
+
+    assert triage_records == []
+
+
+@pytest.mark.asyncio
 async def test_publish_triage_records_to_notion_ensures_database_and_upserts_rows(tmp_path) -> None:
     from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
 
@@ -578,6 +1419,224 @@ async def test_publish_triage_records_to_notion_ensures_database_and_upserts_row
     assert match_value == "2026-03-07|BAE Fylde|source_unconfigured"
     assert properties["Asset"] == {"title": [{"text": {"content": "BAE Fylde"}}]}
     assert properties["AM Email Draft"] == {"rich_text": [{"text": {"content": "Draft body"}}]}
+
+
+def test_publish_daily_dataset_to_notion_uses_parent_page_and_upserts_rows(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text("{}", encoding="utf-8")
+
+    notion = FakeWritableNotionAssetRegisterService([])
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={},
+    )
+
+    result = service.publish_daily_dataset_to_notion(
+        [
+            {
+                "asset_name": "Cromwell Tools",
+                "target_date": "2026-03-07",
+                "pac_date": "",
+                "pac_phase": "unknown",
+                "pac_in_past": False,
+                "pac_date_missing": True,
+                "has_any_data": True,
+                "sources_with_data": "juggle",
+                "preferred_source": "juggle",
+                "checked_sources": "juggle",
+                "match_name": "Cromwell Tools",
+                "match_method": "notion_override",
+                "match_confidence": 1.0,
+                "resolved_source_types": "juggle",
+                "resolution_notes": "Used Data Source Match override from Notion.",
+                "project_name": "Cromwell Tools",
+                "customer_name": "Cromwell",
+                "spv": "",
+                "priority": "",
+                "site_address": "Somewhere",
+                "am_contact_name": "Alice Manager",
+                "am_contact_email": "alice@example.com",
+                "notion_page_id": "page_123",
+                "notion_url": "https://www.notion.so/asset",
+                "capacity_kwp": 500.0,
+                "ppa_rate_gbp_mwh": 95.0,
+                "ppa_rate_source": "PPA Rate (GBP/MWh)",
+                "target_pr_assumption_ratio": 0.8,
+                "target_gen_yesterday_kwh": 1200.0,
+                "target_revenue_yesterday_gbp": 114.0,
+                "target_weather_yesterday": "archive",
+                "target_gen_today_kwh": 1350.0,
+                "target_revenue_today_gbp": 128.25,
+                "target_weather_today": "forecast",
+                "target_gen_week_kwh": 8200.0,
+                "target_revenue_week_gbp": 779.0,
+                "target_weather_week": "archive+forecast",
+                "target_revenue_message": "",
+                "irradiance_source": "juggle_weather_station",
+                "irradiance_device_id": "WETH:000001",
+                "irradiance_threshold_wm2": 75.0,
+                "daylight_hh_periods": 18,
+                "available_hh_periods": 17,
+                "availability_ratio": 17 / 18,
+                "actual_daylight_kwh": 123.4,
+                "expected_daylight_kwh": 150.0,
+                "h_poa_daylight_kwh_m2": 0.3,
+                "performance_ratio": 123.4 / 150.0,
+                "irradiance_message": "",
+                "inverter_count": 2,
+                "inverters_reporting": 1,
+                "best_inverter_availability_ratio": 1.0,
+                "worst_inverter_availability_ratio": 0.5,
+                "inverter_availability_summary": "INV:A 100.0% (18/18); INV:B 50.0% (9/18)",
+                "inverter_availability_breakdown": [
+                    {
+                        "device_id": "INV:A",
+                        "daylight_hh_periods": 18,
+                        "available_hh_periods": 18,
+                        "availability_ratio": 1.0,
+                        "actual_daylight_kwh": 70.1,
+                    },
+                    {
+                        "device_id": "INV:B",
+                        "daylight_hh_periods": 18,
+                        "available_hh_periods": 9,
+                        "availability_ratio": 0.5,
+                        "actual_daylight_kwh": 53.3,
+                    },
+                ],
+                "juggle_identifier": "AMP:00001",
+                "juggle_status": "ok",
+                "juggle_has_data": True,
+                "juggle_sample_count": 96,
+                "juggle_message": "",
+                "solaredge_identifier": "",
+                "solaredge_status": "unconfigured",
+                "solaredge_has_data": False,
+                "solaredge_sample_count": 0,
+                "solaredge_message": "",
+                "solis_identifier": "",
+                "solis_status": "unconfigured",
+                "solis_has_data": False,
+                "solis_sample_count": 0,
+                "solis_message": "",
+                "enphase_identifier": "",
+                "enphase_status": "unconfigured",
+                "enphase_has_data": False,
+                "enphase_sample_count": 0,
+                "enphase_message": "",
+                "huawei_identifier": "",
+                "huawei_status": "unconfigured",
+                "huawei_has_data": False,
+                "huawei_sample_count": 0,
+                "huawei_message": "",
+                "sma_identifier": "",
+                "sma_status": "unconfigured",
+                "sma_has_data": False,
+                "sma_sample_count": 0,
+                "sma_message": "",
+            },
+            {
+                "asset_name": "No Data Site",
+                "target_date": "2026-03-07",
+                "pac_date": "2026-03-01",
+                "pac_phase": "post_pac",
+                "pac_in_past": True,
+                "pac_date_missing": False,
+                "has_any_data": False,
+                "sources_with_data": "",
+                "preferred_source": "",
+                "checked_sources": "juggle",
+                "match_name": "",
+                "match_method": "unresolved",
+                "match_confidence": 0.0,
+                "resolved_source_types": "",
+                "resolution_notes": "No data",
+                "project_name": "No Data Site",
+                "customer_name": "",
+                "spv": "",
+                "priority": "",
+                "notion_url": "https://www.notion.so/no-data",
+                "juggle_status": "no_data",
+                "juggle_sample_count": 0,
+                "solaredge_status": "unconfigured",
+                "solaredge_sample_count": 0,
+                "solis_status": "unconfigured",
+                "solis_sample_count": 0,
+                "enphase_status": "unconfigured",
+                "enphase_sample_count": 0,
+                "huawei_status": "unconfigured",
+                "huawei_sample_count": 0,
+                "sma_status": "unconfigured",
+                "sma_sample_count": 0,
+            }
+        ],
+        parent_page_id="page_daily_json",
+    )
+
+    assert result["database_id"] == "db_triage"
+    assert result["eligible_rows"] == 1
+    assert result["published"] == 1
+    assert notion.database_ensures[0][0] == "Daily JSON"
+    assert notion.database_ensures[0][2] == "page_daily_json"
+    assert notion.database_property_ensures[0][0] == "db_triage"
+    assert len(notion.database_upserts) == 1
+    database_id, match_field, match_value, properties = notion.database_upserts[0]
+    assert database_id == "db_triage"
+    assert match_field == "Row Key"
+    assert match_value == "2026-03-07|Cromwell Tools"
+    assert properties["PAC Date"] == {"date": None}
+    assert properties["PAC Phase"] == {"rich_text": [{"text": {"content": "unknown"}}]}
+    assert properties["Has Any Data"] == {"checkbox": True}
+    assert properties["Juggle Identifier"] == {"rich_text": [{"text": {"content": "AMP:00001"}}]}
+    assert properties["Juggle Has Data"] == {"checkbox": True}
+    assert properties["Availability (%)"] == {"number": pytest.approx(17 / 18)}
+    assert properties["PR (%)"] == {"number": pytest.approx(123.4 / 150.0)}
+    assert properties["PPA Rate (GBP/MWh)"] == {"number": 95.0}
+    assert properties["PPA Rate Source"] == {
+        "rich_text": [{"text": {"content": "PPA Rate (GBP/MWh)"}}]
+    }
+    assert properties["Target PR Assumption (%)"] == {"number": 0.8}
+    assert properties["Target Gen Yesterday (kWh)"] == {"number": 1200.0}
+    assert properties["Target Revenue Yesterday (£)"] == {"number": 114.0}
+    assert properties["Target Weather Yesterday"] == {
+        "rich_text": [{"text": {"content": "archive"}}]
+    }
+    assert properties["Target Gen Today (kWh)"] == {"number": 1350.0}
+    assert properties["Target Revenue Today (£)"] == {"number": 128.25}
+    assert properties["Target Weather Today"] == {
+        "rich_text": [{"text": {"content": "forecast"}}]
+    }
+    assert properties["Target Gen Week (kWh)"] == {"number": 8200.0}
+    assert properties["Target Revenue Week (£)"] == {"number": 779.0}
+    assert properties["Target Weather Week"] == {
+        "rich_text": [{"text": {"content": "archive+forecast"}}]
+    }
+    assert properties["Inverter Count"] == {"number": 2.0}
+    assert properties["Inverters Reporting"] == {"number": 1.0}
+    assert properties["Best Inverter Availability (%)"] == {"number": 1.0}
+    assert properties["Worst Inverter Availability (%)"] == {"number": 0.5}
+    assert properties["Inverter Availability Summary"] == {
+        "rich_text": [{"text": {"content": "INV:A 100.0% (18/18); INV:B 50.0% (9/18)"}}]
+    }
+    assert properties["Inverter Availability Breakdown"] == {
+        "rich_text": [
+            {
+                "text": {
+                    "content": (
+                        '[{"actual_daylight_kwh": 70.1, "availability_ratio": 1.0, '
+                        '"available_hh_periods": 18, "daylight_hh_periods": 18, '
+                        '"device_id": "INV:A"}, {"actual_daylight_kwh": 53.3, '
+                        '"availability_ratio": 0.5, "available_hh_periods": 9, '
+                        '"daylight_hh_periods": 18, "device_id": "INV:B"}]'
+                    )
+                }
+            }
+        ]
+    }
 
 
 @pytest.mark.asyncio
@@ -644,3 +1703,20 @@ def test_emig_adapter_maps_iso_z_timestamps_with_microseconds() -> None:
     assert reading is not None
     assert reading.timestamp.isoformat() == "2026-03-07T00:00:00+00:00"
     assert reading.power_kw == pytest.approx(1200)
+
+
+def test_emig_adapter_maps_import_active_power_watts_to_kw() -> None:
+    from solar_platform.ingestion.emig_adapter import EMIGAdapter
+
+    adapter = EMIGAdapter(api_key="dummy")
+    raw = {
+        "ts": "2026-03-07T06:45:00.000000Z",
+        "importActivePower": {"value": 3003, "unit": "W"},
+        "exportEnergy": {"value": 207887500, "unit": "Wh"},
+    }
+
+    reading = adapter._map_reading(raw, plant_uid="ERS:00001", emig_id="INVERT:002946")
+
+    assert reading is not None
+    assert reading.timestamp.isoformat() == "2026-03-07T06:45:00+00:00"
+    assert reading.power_kw == pytest.approx(3.003)
