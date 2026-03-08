@@ -16,11 +16,6 @@ from typing import Any, Protocol
 import requests
 
 from solar_platform.config import get_settings
-from solar_platform.ingestion.emig_adapter import EMIGAdapter
-from solar_platform.ingestion.enphase_adapter import EnphaseAdapter
-from solar_platform.ingestion.huawei_adapter import HuaweiAdapter
-from solar_platform.ingestion.sma_adapter import SMAAdapter
-from solar_platform.ingestion.solaredge_adapter import SolarEdgeAdapter
 from solar_platform.integrations.notion_assets import NotionAssetRegisterService
 
 
@@ -626,13 +621,38 @@ class SolisDailyChecker:
 
 
 def build_default_checkers() -> dict[str, DailyDataChecker]:
+    def _build_juggle_adapter():
+        from solar_platform.ingestion.emig_adapter import EMIGAdapter
+
+        return EMIGAdapter()
+
+    def _build_solaredge_adapter():
+        from solar_platform.ingestion.solaredge_adapter import SolarEdgeAdapter
+
+        return SolarEdgeAdapter()
+
+    def _build_enphase_adapter():
+        from solar_platform.ingestion.enphase_adapter import EnphaseAdapter
+
+        return EnphaseAdapter()
+
+    def _build_huawei_adapter():
+        from solar_platform.ingestion.huawei_adapter import HuaweiAdapter
+
+        return HuaweiAdapter()
+
+    def _build_sma_adapter():
+        from solar_platform.ingestion.sma_adapter import SMAAdapter
+
+        return SMAAdapter()
+
     return {
-        "juggle": AdapterDailyChecker("juggle", lambda: EMIGAdapter()),
-        "solaredge": AdapterDailyChecker("solaredge", lambda: SolarEdgeAdapter()),
+        "juggle": AdapterDailyChecker("juggle", _build_juggle_adapter),
+        "solaredge": AdapterDailyChecker("solaredge", _build_solaredge_adapter),
         "solis": SolisDailyChecker(),
-        "enphase": AdapterDailyChecker("enphase", lambda: EnphaseAdapter()),
-        "huawei": AdapterDailyChecker("huawei", lambda: HuaweiAdapter()),
-        "sma": AdapterDailyChecker("sma", lambda: SMAAdapter()),
+        "enphase": AdapterDailyChecker("enphase", _build_enphase_adapter),
+        "huawei": AdapterDailyChecker("huawei", _build_huawei_adapter),
+        "sma": AdapterDailyChecker("sma", _build_sma_adapter),
     }
 
 
