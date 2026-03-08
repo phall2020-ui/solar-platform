@@ -6,21 +6,15 @@ import sys
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-import pvlib
 
 # Add src to python path for solar_platform package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'src')))
 
-from solar_platform.ingestion.emig_adapter import EMIGAdapter
-from solar_platform.analytics.performance_intelligence.copilot_pipeline import analyze_telemetry_dataframe
-from solar_platform.analytics.performance_intelligence.diagnosis import build_evidence_pack
 from solar_platform.services.performance_copilot_asset_audit import (
     AssetRegisterAuditService,
     run_asset_register_yesterday_audit,
     run_asset_register_triage_publish,
 )
-
-from openai import OpenAI
 
 # Configuration
 NEWFOLD_FARM_UID = "ERS:00001" # Correct UID from EMIG data
@@ -30,6 +24,8 @@ INTERVAL_HOURS = 0.25 # 15 mins
 
 async def fetch_emig_data() -> pd.DataFrame:
     """Fetch the last 24 hours of data from EMIG for Newfold Farm."""
+    from solar_platform.ingestion.emig_adapter import EMIGAdapter
+
     api_key = os.getenv("JUGGLE_API_KEY") # reusing token variable
     if not api_key:
         raise ValueError("JUGGLE_API_KEY environment variable is required")
@@ -160,6 +156,8 @@ async def fetch_emig_data() -> pd.DataFrame:
 
 def generate_ai_diagnosis(evidence_pack: dict) -> str:
     """Send evidence pack to OpenAI LLM for diagnosis."""
+    from openai import OpenAI
+
     openai_api_key = os.getenv("OPENAI_API_KEY")
     if not openai_api_key:
         raise ValueError("OPENAI_API_KEY environment variable is required")
@@ -233,6 +231,9 @@ def _parse_reference_date(value: str | None):
 
 async def run_single_site_copilot():
     try:
+        from solar_platform.analytics.performance_intelligence.copilot_pipeline import analyze_telemetry_dataframe
+        from solar_platform.analytics.performance_intelligence.diagnosis import build_evidence_pack
+
         # 1. Fetch Data
         df = await fetch_emig_data()
         
