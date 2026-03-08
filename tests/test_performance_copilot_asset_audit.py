@@ -162,6 +162,60 @@ async def test_build_yesterday_dataset_uses_mapping_and_check_results(tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_build_yesterday_dataset_ignores_placeholder_juggle_identifier_when_solaredge_exists(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text(
+        """
+        {
+          "PPA Park Hall": {
+            "platform": "solaredge",
+            "site_id": "4667531",
+            "juggle_uid": "?"
+          }
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    notion = FakeNotionAssetRegisterService(
+        [
+            {
+                "Alias": "Park Hall",
+                "PAC Date": "2026-03-01",
+                "Data Source Match": "PPA Park Hall",
+            },
+        ]
+    )
+    solaredge_checker = FakeChecker("solaredge", has_data=True)
+    juggle_checker = FakeChecker("juggle", has_data=False, status="error")
+
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={
+            "juggle": juggle_checker,
+            "solaredge": solaredge_checker,
+        },
+        supported_sources=("juggle", "solaredge"),
+    )
+
+    dataset = await service.build_yesterday_dataset(reference_date=date(2026, 3, 8))
+
+    row = dataset[0]
+    assert row["juggle_identifier"] == ""
+    assert row["juggle_status"] == "unconfigured"
+    assert row["solaredge_identifier"] == "4667531"
+    assert row["solaredge_has_data"] is True
+    assert row["checked_sources"] == "solaredge"
+    assert row["has_any_data"] is True
+    assert juggle_checker.calls == []
+    assert solaredge_checker.calls == [("4667531", date(2026, 3, 7))]
+
+
+@pytest.mark.asyncio
 async def test_build_yesterday_dataset_fuzzy_matches_legacy_mapping_names(tmp_path) -> None:
     from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
 
@@ -489,3 +543,43 @@ async def test_publish_triage_records_to_notion_ensures_database_and_upserts_row
     assert match_value == "2026-03-07|BAE Fylde|source_unconfigured"
     assert properties["Asset"] == {"title": [{"text": {"content": "BAE Fylde"}}]}
     assert properties["AM Email Draft"] == {"rich_text": [{"text": {"content": "Draft body"}}]}
+
+
+@pytest.mark.asyncio
+async def test_solaredge_daily_checker_uses_site_specific_keys_json(monkeypatch) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import SolarEdgeDailyChecker
+
+    class FakeAdapter:
+        def __init__(self, api_key: str) -> None:
+            self.api_key = api_key
+
+        async def fetch_readings(self, identifier, start, end):  # noqa: ANN001
+            assert identifier == "4667531"
+            assert start.date() == date(2026, 3, 7)
+            assert end.date() == date(2026, 3, 8)
+            return SimpleNamespace(readings=[{"power_kw": 1.2}], errors=[], warnings=[])
+
+    monkeypatch.setenv("SOLAREDGE_KEYS_JSON", '{"4667531":"site-key-123"}')
+    checker = SolarEdgeDailyChecker()
+    monkeypatch.setattr(checker, "_build_adapter", lambda api_key: FakeAdapter(api_key))
+
+    result = await checker.check_day("4667531", date(2026, 3, 7))
+
+    assert result.status == "ok"
+    assert result.has_data is True
+    assert result.sample_count == 1
+    assert result.identifier == "4667531"
+
+
+@pytest.mark.asyncio
+async def test_solaredge_daily_checker_reports_unconfigured_when_site_key_missing(monkeypatch) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import SolarEdgeDailyChecker
+
+    monkeypatch.setenv("SOLAREDGE_KEYS_JSON", '{"1111111":"other-key"}')
+    checker = SolarEdgeDailyChecker()
+
+    result = await checker.check_day("4667531", date(2026, 3, 7))
+
+    assert result.status == "unconfigured"
+    assert result.has_data is False
+    assert "missing site-specific API key" in result.message

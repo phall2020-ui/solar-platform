@@ -181,6 +181,17 @@ def _normalise_key(value: Any) -> str:
     return " ".join(text.split())
 
 
+def _clean_identifier(value: Any) -> str:
+    if value in (None, "", []):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    if _normalise_key(text) in {"?", "n/a", "na", "none", "null", "unknown", "tbc", "pending"}:
+        return ""
+    return text
+
+
 def _get_value(row: dict[str, Any], candidates: tuple[str, ...]) -> Any:
     if not row:
         return None
@@ -545,6 +556,81 @@ class AdapterDailyChecker:
             )
 
 
+class SolarEdgeDailyChecker:
+    def __init__(self) -> None:
+        self.base_url = os.getenv("SOLAREDGE_API_URL", "https://monitoringapi.solaredge.com")
+        self.site_keys = self._load_site_keys()
+
+    def _load_site_keys(self) -> dict[str, str]:
+        raw = str(os.getenv("SOLAREDGE_KEYS_JSON", "")).strip()
+        if not raw:
+            return {}
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        return {
+            str(site_id).strip(): str(api_key).strip()
+            for site_id, api_key in payload.items()
+            if _clean_identifier(site_id) and _clean_identifier(api_key)
+        }
+
+    def _build_adapter(self, api_key: str):
+        from solar_platform.ingestion.solaredge_adapter import SolarEdgeAdapter
+
+        return SolarEdgeAdapter(api_key=api_key, base_url=self.base_url)
+
+    async def check_day(self, identifier: str, target_date: date) -> SourceCheckResult:
+        site_id = _clean_identifier(identifier)
+        if not site_id:
+            return SourceCheckResult(
+                source="solaredge",
+                status="missing_identifier",
+                identifier=None,
+                target_date=target_date.isoformat(),
+                has_data=False,
+                message="no source identifier available",
+            )
+
+        api_key = self.site_keys.get(site_id)
+        if not api_key:
+            return SourceCheckResult(
+                source="solaredge",
+                status="unconfigured",
+                identifier=site_id,
+                target_date=target_date.isoformat(),
+                has_data=False,
+                message="missing site-specific API key in SOLAREDGE_KEYS_JSON",
+            )
+
+        adapter = self._build_adapter(api_key)
+        start = datetime.combine(target_date, time.min, tzinfo=UTC)
+        end = start + timedelta(days=1)
+        try:
+            batch = await adapter.fetch_readings(site_id, start, end)
+            has_data = bool(getattr(batch, "readings", []))
+            return SourceCheckResult(
+                source="solaredge",
+                status="ok" if has_data else "no_data",
+                identifier=site_id,
+                target_date=target_date.isoformat(),
+                has_data=has_data,
+                sample_count=len(getattr(batch, "readings", [])),
+                message="; ".join(getattr(batch, "errors", []) + getattr(batch, "warnings", [])),
+            )
+        except Exception as exc:  # pragma: no cover - exercised against live APIs only
+            return SourceCheckResult(
+                source="solaredge",
+                status="error",
+                identifier=site_id,
+                target_date=target_date.isoformat(),
+                has_data=False,
+                message=str(exc),
+            )
+
+
 class SolisDailyChecker:
     def __init__(self) -> None:
         self.key_id = os.getenv("SOLIS_KEY_ID", "")
@@ -626,11 +712,6 @@ def build_default_checkers() -> dict[str, DailyDataChecker]:
 
         return EMIGAdapter()
 
-    def _build_solaredge_adapter():
-        from solar_platform.ingestion.solaredge_adapter import SolarEdgeAdapter
-
-        return SolarEdgeAdapter()
-
     def _build_enphase_adapter():
         from solar_platform.ingestion.enphase_adapter import EnphaseAdapter
 
@@ -648,7 +729,7 @@ def build_default_checkers() -> dict[str, DailyDataChecker]:
 
     return {
         "juggle": AdapterDailyChecker("juggle", _build_juggle_adapter),
-        "solaredge": AdapterDailyChecker("solaredge", _build_solaredge_adapter),
+        "solaredge": SolarEdgeDailyChecker(),
         "solis": SolisDailyChecker(),
         "enphase": AdapterDailyChecker("enphase", _build_enphase_adapter),
         "huawei": AdapterDailyChecker("huawei", _build_huawei_adapter),
@@ -738,8 +819,9 @@ class AssetRegisterAuditService:
         identifiers: dict[str, str] = {}
         for source, candidates in SOURCE_IDENTIFIER_FIELD_CANDIDATES.items():
             direct = _get_value(asset, candidates)
-            if direct not in (None, "", []):
-                identifiers[source] = str(direct).strip()
+            cleaned = _clean_identifier(direct)
+            if cleaned:
+                identifiers[source] = cleaned
         return {key: value for key, value in identifiers.items() if value}
 
     def _resolve_match(self, asset: dict[str, Any]) -> MatchResolution:
@@ -815,11 +897,12 @@ class AssetRegisterAuditService:
         identifiers = self._extract_direct_identifiers(asset)
         mapping = resolution.mapping or {}
 
-        if mapping.get("juggle_uid") and "juggle" not in identifiers:
-            identifiers["juggle"] = str(mapping["juggle_uid"]).strip()
+        juggle_uid = _clean_identifier(mapping.get("juggle_uid"))
+        if juggle_uid and "juggle" not in identifiers:
+            identifiers["juggle"] = juggle_uid
 
         mapped_platform = _canonical_platform(_normalise_key(mapping.get("platform")))
-        mapped_site_id = str(mapping.get("site_id", "")).strip()
+        mapped_site_id = _clean_identifier(mapping.get("site_id", ""))
         if mapped_platform and mapped_site_id and mapped_platform not in identifiers:
             identifiers[mapped_platform] = mapped_site_id
 
@@ -841,9 +924,14 @@ class AssetRegisterAuditService:
         if mapped_platform:
             hinted.add(mapped_platform)
 
-        ordered = ["juggle"]
+        ordered: list[str] = []
+        if not resolution.mapping and not identifiers and not hinted:
+            ordered.append("juggle")
+        elif "juggle" in identifiers or "juggle" in hinted:
+            ordered.append("juggle")
+
         for source in self.supported_sources:
-            if source == "juggle":
+            if source == "juggle" or source in ordered:
                 continue
             if source in hinted or source in identifiers:
                 ordered.append(source)
