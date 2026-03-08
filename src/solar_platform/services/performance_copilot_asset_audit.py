@@ -87,6 +87,40 @@ DEFAULT_DATA_SOURCE_MATCH_UPDATES: dict[str, str] = {
     "Wienerberger Floplast": "FloPlast",
 }
 
+DEFAULT_CONFIRMED_SOURCE_REGISTRY: dict[str, dict[str, str]] = {
+    "Newfold Farm": {"platform": "juggle", "site_id": "", "juggle_uid": "ERS:00001"},
+    "FloPlast": {"platform": "juggle", "site_id": "", "juggle_uid": "AMP:00032"},
+    "Finlay Beverages": {
+        "platform": "solis",
+        "site_id": "1298491919450070492",
+        "juggle_uid": "AMP:00031",
+    },
+    "Blachford UK": {
+        "platform": "solaredge",
+        "site_id": "4466155",
+        "juggle_uid": "AMP:00024",
+    },
+    "PPA Park Hall": {"platform": "solaredge", "site_id": "4667531", "juggle_uid": "?"},
+    "PPA Panorama Kitchens": {"platform": "solaredge", "site_id": "4519032", "juggle_uid": "?"},
+    "PPA Shawton Engineering Ltd": {"platform": "solaredge", "site_id": "2798969", "juggle_uid": "?"},
+    "PPA I&N Fabrications Ltd": {"platform": "solaredge", "site_id": "2688590", "juggle_uid": "?"},
+    "PPA Swift Dental Group": {"platform": "solaredge", "site_id": "3656221", "juggle_uid": "?"},
+    "PPA Uniroyal Global": {"platform": "solaredge", "site_id": "3933004", "juggle_uid": "?"},
+    "PPA Valley Hydraulics": {"platform": "solaredge", "site_id": "2626861", "juggle_uid": "?"},
+    "PPA WALC Adult Learning Centre": {"platform": "solaredge", "site_id": "3829329", "juggle_uid": "?"},
+    "PPA WALC Leigh College": {"platform": "solaredge", "site_id": "3888537", "juggle_uid": "?"},
+    "PPA WALC Pagefield": {"platform": "solaredge", "site_id": "3823337", "juggle_uid": "?"},
+    "PPA Dunham Forest Golf Club": {"platform": "solaredge", "site_id": "3490228", "juggle_uid": "?"},
+    "PPA Bannatynes Braintree": {"platform": "solaredge", "site_id": "4284090", "juggle_uid": "?"},
+    "PPA Bannatynes Bury St Edmunds": {"platform": "solaredge", "site_id": "4309872", "juggle_uid": "?"},
+    "PPA Bannatynes Colchester Kingsford Park": {"platform": "solaredge", "site_id": "4320553", "juggle_uid": "?"},
+    "PPA Bannatynes Cookridge Hall": {"platform": "solaredge", "site_id": "4361798", "juggle_uid": "?"},
+    "PPA Bannatynes Darlington Head Office": {"platform": "solaredge", "site_id": "4307544", "juggle_uid": "?"},
+    "PPA Bannatynes Norwich": {"platform": "solaredge", "site_id": "4319038", "juggle_uid": "?"},
+    "PPA Bannatynes Weybridge": {"platform": "solaredge", "site_id": "4283465", "juggle_uid": "?"},
+    "PPA Bannatynes Wildmoor": {"platform": "solaredge", "site_id": "4338522", "juggle_uid": "?"},
+}
+
 TRIAGE_DATABASE_TITLE = "Solar Copilot Daily Triage"
 
 TRIAGE_DATABASE_PROPERTIES: dict[str, dict[str, Any]] = {
@@ -461,14 +495,18 @@ def _canonical_platform(token: str) -> str | None:
 
 
 def _load_legacy_mapping(path: Path | None) -> dict[str, dict[str, Any]]:
+    mapping: dict[str, dict[str, Any]] = {}
+    for key, value in DEFAULT_CONFIRMED_SOURCE_REGISTRY.items():
+        if isinstance(value, dict):
+            mapping[_normalise_key(key)] = {**value, "_mapping_name": key}
+
     if path is None or not path.exists():
-        return {}
+        return mapping
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        return {}
+        return mapping
 
-    mapping: dict[str, dict[str, Any]] = {}
     for key, value in raw.items():
         if isinstance(value, dict):
             mapping[_normalise_key(key)] = {**value, "_mapping_name": key}

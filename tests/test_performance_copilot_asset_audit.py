@@ -346,6 +346,41 @@ async def test_build_yesterday_dataset_prefers_notion_override_before_fuzzy_matc
 
 
 @pytest.mark.asyncio
+async def test_build_yesterday_dataset_uses_builtin_confirmed_registry_when_file_missing(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    missing_mapping_path = tmp_path / "missing.json"
+    notion = FakeNotionAssetRegisterService(
+        [
+            {
+                "Alias": "Park Hall",
+                "PAC Date": "2026-03-01",
+                "Data Source Match": "PPA Park Hall",
+            },
+        ]
+    )
+    solaredge_checker = FakeChecker("solaredge", has_data=True)
+
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=missing_mapping_path,
+        checkers={"solaredge": solaredge_checker},
+        supported_sources=("juggle", "solaredge"),
+    )
+
+    dataset = await service.build_yesterday_dataset(reference_date=date(2026, 3, 8))
+
+    row = dataset[0]
+    assert row["match_name"] == "PPA Park Hall"
+    assert row["match_method"] == "notion_override"
+    assert row["solaredge_identifier"] == "4667531"
+    assert row["checked_sources"] == "solaredge"
+    assert row["solaredge_has_data"] is True
+    assert solaredge_checker.calls == [("4667531", date(2026, 3, 7))]
+
+
+@pytest.mark.asyncio
 async def test_build_yesterday_dataset_uses_explicit_identifiers_before_registry(tmp_path) -> None:
     from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
 
