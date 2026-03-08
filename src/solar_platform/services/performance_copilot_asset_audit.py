@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import inspect
 import json
+import logging
 import os
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
@@ -22,6 +23,8 @@ from solar_platform.db.repository import PlantRepository, ReadingsRepository
 from solar_platform.integrations.notion_assets import NotionAssetRegisterService
 from solar_platform.services.site_locations import SiteLocationService
 from solar_platform.weather.open_meteo import OpenMeteoArchiveClient, OpenMeteoClient
+
+logger = logging.getLogger(__name__)
 
 
 SUPPORTED_SOURCES: tuple[str, ...] = (
@@ -1426,11 +1429,19 @@ class RepositoryDaylightMetricsFetcher:
         for candidate in (match_name, asset_name):
             if not candidate:
                 continue
-            plant = self.plant_repository.get_by_alias(candidate)
+            try:
+                plant = self.plant_repository.get_by_alias(candidate)
+            except Exception as exc:
+                logger.warning("plant registry alias lookup failed for %s: %s", candidate, exc)
+                plant = None
             if plant and plant.get("plant_uid"):
                 return str(plant["plant_uid"]).strip()
 
-        all_plants = self.plant_repository.get_all()
+        try:
+            all_plants = self.plant_repository.get_all()
+        except Exception as exc:
+            logger.warning("plant registry bulk lookup failed: %s", exc)
+            return ""
         if not isinstance(all_plants, pd.DataFrame) or all_plants.empty:
             return ""
 

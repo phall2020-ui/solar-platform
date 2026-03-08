@@ -137,6 +137,17 @@ class FakePlantRepository:
         return pd.DataFrame(self._rows)
 
 
+class FakePlantRepositoryRaising:
+    def __init__(self, error: str) -> None:
+        self.error = error
+
+    def get_by_alias(self, alias: str):  # noqa: ANN001
+        raise RuntimeError(self.error)
+
+    def get_all(self) -> pd.DataFrame:
+        raise RuntimeError(self.error)
+
+
 class FakeReadingsRepository:
     def __init__(self, rows: list[dict[str, object]]) -> None:
         self._rows = rows
@@ -442,6 +453,57 @@ async def test_repository_daylight_metrics_fetcher_falls_back_to_archive_when_re
     assert metrics["irradiance_device_id"] == "Newfold Farm"
     assert metrics["availability_ratio"] == pytest.approx(1.0)
     assert "Repo POA lookup failed: database does not exist" not in metrics["irradiance_message"]
+
+
+@pytest.mark.asyncio
+async def test_repository_daylight_metrics_fetcher_degrades_gracefully_when_plant_registry_lookup_fails() -> None:
+    from solar_platform.services.performance_copilot_asset_audit import RepositoryDaylightMetricsFetcher
+
+    archive_rows = [
+        {"hh_ts": "2026-03-07T10:00:00Z", "poa_interval_kwh_m2": 0.20, "poa_wm2": 200.0},
+        {"hh_ts": "2026-03-07T11:00:00Z", "poa_interval_kwh_m2": 0.20, "poa_wm2": 200.0},
+    ]
+    generation_rows = SimpleNamespace(
+        readings=[
+            SimpleNamespace(timestamp="2026-03-07T10:00:00Z", device_id="INV:1", power_kw=0.5),
+            SimpleNamespace(timestamp="2026-03-07T11:00:00Z", device_id="INV:1", power_kw=0.5),
+        ]
+    )
+
+    async def fake_batch_fetcher(source, identifier, target_date):  # noqa: ANN001
+        return generation_rows
+
+    fetcher = RepositoryDaylightMetricsFetcher(
+        plant_repository=FakePlantRepositoryRaising("database does not exist"),
+        readings_repository=FakeReadingsRepository([]),
+        site_location_service=SimpleNamespace(
+            get_site=lambda name: SimpleNamespace(
+                name=name,
+                latitude=53.0,
+                longitude=-2.0,
+                tilt_deg=20.0,
+                azimuth_deg=180.0,
+                timezone="Europe/London",
+            ),
+            get_all_sites=lambda: [],
+        ),
+        archive_irradiance_fetcher=FakeArchiveIrradianceFetcher(archive_rows),
+        batch_fetcher=fake_batch_fetcher,
+    )
+
+    metrics = await fetcher.get_day_metrics(
+        "4667531",
+        date(2026, 3, 7),
+        capacity_kwp=100.0,
+        asset_name="BAE Fylde",
+        match_name="Newfold Farm",
+        source="solaredge",
+    )
+
+    assert metrics["irradiance_source"] == "openmeteo_archive_gti"
+    assert metrics["irradiance_device_id"] == "Newfold Farm"
+    assert metrics["availability_ratio"] == pytest.approx(1.0)
+    assert "plant registry lookup failed" not in metrics["irradiance_message"].lower()
 
 @pytest.mark.asyncio
 async def test_build_yesterday_dataset_uses_mapping_and_check_results(tmp_path) -> None:
