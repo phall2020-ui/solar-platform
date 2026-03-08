@@ -130,6 +130,17 @@ jobs:
           import os
           from pathlib import Path
 
+          def load_json_loose(path: Path):
+              raw = path.read_text(encoding="utf-8")
+              try:
+                  return json.loads(raw)
+              except json.JSONDecodeError:
+                  start = raw.find("{")
+                  end = raw.rfind("}")
+                  if start != -1 and end != -1 and end > start:
+                      return json.loads(raw[start:end + 1])
+                  raise
+
           output_dir = Path(os.environ["OUTPUT_DIR"])
           summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
           datasets = sorted(output_dir.glob("asset_yesterday_dataset_*.json"))
@@ -139,7 +150,7 @@ jobs:
           dataset_path = datasets[-1]
           dataset = json.loads(dataset_path.read_text(encoding="utf-8"))
           backfill_path = output_dir / "backfill_summary.json"
-          backfill = json.loads(backfill_path.read_text(encoding="utf-8")) if backfill_path.exists() else {}
+          backfill = load_json_loose(backfill_path) if backfill_path.exists() else {}
 
           sources = ("juggle", "solaredge", "solis", "enphase", "huawei", "sma")
           resolved = sum(1 for row in dataset if row.get("match_method") != "unresolved")
