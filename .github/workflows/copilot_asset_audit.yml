@@ -35,7 +35,7 @@ jobs:
       PYTHONPATH: ${{ github.workspace }}/src
       NOTION_ASSET_SYNC_ENABLED: "true"
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-      NOTION_DB_ID: ${{ secrets.NOTION_DB_ID }}
+      NOTION_DB_ID: 2d01773a-96c0-807b-b964-ce1aff762997
       JUGGLE_API_KEY: ${{ secrets.JUGGLE_API_KEY }}
       SOLIS_API_URL: ${{ secrets.SOLIS_API_URL }}
       SOLIS_KEY_ID: ${{ secrets.SOLIS_KEY_ID }}
@@ -83,7 +83,7 @@ jobs:
       - name: Validate required secrets
         run: |
           missing=()
-          for name in NOTION_TOKEN NOTION_DB_ID JUGGLE_API_KEY; do
+          for name in NOTION_TOKEN JUGGLE_API_KEY; do
             if [ -z "${!name}" ]; then
               missing+=("$name")
             fi
