@@ -79,6 +79,7 @@ jobs:
             PyJWT \
             openai \
             pytest
+            tenacity
 
       - name: Validate required secrets
         run: |
