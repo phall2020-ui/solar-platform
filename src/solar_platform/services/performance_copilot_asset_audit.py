@@ -2830,9 +2830,14 @@ class AssetRegisterAuditService:
         database_title: str = DAILY_JSON_DATABASE_TITLE,
         only_with_data: bool = True,
     ) -> dict[str, Any]:
-        rows_to_publish = [
-            row for row in dataset if row.get("has_any_data")
-        ] if only_with_data else list(dataset)
+        if only_with_data:
+            rows_to_publish = [
+                row
+                for row in dataset
+                if row.get("has_any_data") or row.get("findings")
+            ]
+        else:
+            rows_to_publish = list(dataset)
         target_database_id = str(database_id or "").strip()
         if not target_database_id:
             target_database_id = self.notion_service.ensure_database(

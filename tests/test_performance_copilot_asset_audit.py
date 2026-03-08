@@ -2018,6 +2018,81 @@ def test_publish_daily_dataset_to_notion_uses_parent_page_and_appends_rows(tmp_p
     }
 
 
+def test_publish_daily_dataset_to_notion_includes_rows_with_findings_even_without_source_data(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text("{}", encoding="utf-8")
+
+    notion = FakeWritableNotionAssetRegisterService([])
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={},
+    )
+
+    result = service.publish_daily_dataset_to_notion(
+        [
+            {
+                "asset_name": "Hibernian Stadium",
+                "target_date": "2026-03-07",
+                "pac_date": "2026-03-01",
+                "pac_phase": "post_pac",
+                "pac_in_past": True,
+                "pac_date_missing": False,
+                "has_any_data": False,
+                "sources_with_data": "",
+                "preferred_source": "",
+                "checked_sources": "juggle",
+                "match_name": "Hibernian Stadium",
+                "match_method": "notion_override",
+                "match_confidence": 1.0,
+                "resolved_source_types": "juggle",
+                "resolution_notes": "Used Data Source Match override from Notion.",
+                "project_name": "Hibernian Stadium",
+                "customer_name": "",
+                "spv": "",
+                "priority": "",
+                "notion_url": "https://www.notion.so/hibernian",
+                "juggle_status": "missing_identifier",
+                "juggle_sample_count": 0,
+                "solaredge_status": "unconfigured",
+                "solaredge_sample_count": 0,
+                "solis_status": "unconfigured",
+                "solis_sample_count": 0,
+                "enphase_status": "unconfigured",
+                "enphase_sample_count": 0,
+                "huawei_status": "unconfigured",
+                "huawei_sample_count": 0,
+                "sma_status": "unconfigured",
+                "sma_sample_count": 0,
+                "findings": [
+                    {
+                        "finding_type": "missing_identifier",
+                        "severity": "medium",
+                        "confidence": 0.8,
+                        "summary": "Missing Juggle identifier.",
+                        "recommended_action": "Populate the identifier.",
+                    }
+                ],
+                "finding_types": ["missing_identifier"],
+                "actionable_finding_count": 1,
+                "highest_finding_severity": "medium",
+            }
+        ],
+        parent_page_id="page_daily_json",
+    )
+
+    assert result["eligible_rows"] == 1
+    assert result["published"] == 1
+    assert len(notion.database_creates) == 1
+    _, properties = notion.database_creates[0]
+    daily_json = properties["Daily JSON"]["rich_text"][0]["text"]["content"]
+    assert "\"finding_type\": \"missing_identifier\"" in daily_json
+    assert properties["Has Any Data"] == {"checkbox": False}
+
+
 def test_publish_daily_dataset_to_notion_republishes_same_row_key_as_new_row(tmp_path) -> None:
     from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
 
