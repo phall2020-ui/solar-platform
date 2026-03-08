@@ -713,6 +713,41 @@ def _build_finding(
     return finding
 
 
+def _extract_solis_day_energy_from_payload(
+    payload: Any,
+    *,
+    target_date: date | None = None,
+) -> float | None:
+    data = payload.get("data", {}) if isinstance(payload, dict) else payload
+
+    candidates: list[dict[str, Any]] = []
+    if isinstance(data, dict):
+        candidates = [data]
+    elif isinstance(data, list):
+        candidates = [item for item in data if isinstance(item, dict)]
+
+    if target_date and len(candidates) > 1:
+        target_token = target_date.isoformat()
+        dated_candidates = [
+            item
+            for item in candidates
+            if str(item.get("dateStr") or item.get("date") or item.get("time") or "").startswith(target_token)
+        ]
+        if dated_candidates:
+            candidates = dated_candidates
+
+    for item in candidates:
+        value = _coerce_float(
+            item.get("energy")
+            or item.get("eToday")
+            or item.get("dayEnergy")
+            or item.get("dayEnergy1")
+        )
+        if value is not None:
+            return value
+    return None
+
+
 def _derive_pac_phase(pac_date: date | None, as_of_date: date) -> str:
     if pac_date is None:
         return "unknown"
@@ -947,8 +982,10 @@ class SolisDailyChecker:
             )
             response.raise_for_status()
             payload = response.json()
-            data = payload.get("data", {}) if isinstance(payload, dict) else {}
-            raw_value = data.get("energy") or data.get("eToday") or data.get("dayEnergy")
+            raw_value = _extract_solis_day_energy_from_payload(
+                payload,
+                target_date=target_date,
+            )
             has_data = raw_value not in (None, "", 0, 0.0, "0", "0.0")
             return SourceCheckResult(
                 source="solis",
@@ -2271,8 +2308,10 @@ class AssetRegisterAuditService:
             )
             response.raise_for_status()
             payload = response.json()
-            data = payload.get("data", {}) if isinstance(payload, dict) else {}
-            return _coerce_float(data.get("energy") or data.get("eToday") or data.get("dayEnergy"))
+            return _extract_solis_day_energy_from_payload(
+                payload,
+                target_date=target_date,
+            )
         except Exception:
             return None
 

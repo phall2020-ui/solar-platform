@@ -2202,6 +2202,77 @@ def test_solis_daily_checker_uses_default_base_url_when_env_is_empty(monkeypatch
     assert checker.base_url == "https://www.soliscloud.com:13333"
 
 
+@pytest.mark.asyncio
+async def test_solis_daily_checker_accepts_list_data_payload(monkeypatch) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import SolisDailyChecker
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "data": [
+                    {
+                        "dateStr": "2026-03-07",
+                        "energy": "42.5",
+                    }
+                ]
+            }
+
+    monkeypatch.setenv("SOLIS_KEY_ID", "key")
+    monkeypatch.setenv("SOLIS_KEY_SECRET", "secret")
+    monkeypatch.setattr(
+        "solar_platform.services.performance_copilot_asset_audit.requests.post",
+        lambda *args, **kwargs: FakeResponse(),
+    )
+
+    checker = SolisDailyChecker()
+    result = await checker.check_day("1298491919450070492", date(2026, 3, 7))
+
+    assert result.status == "ok"
+    assert result.has_data is True
+    assert result.sample_count == 1
+
+
+def test_fetch_solis_day_energy_accepts_list_data_payload(tmp_path, monkeypatch) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "data": [
+                    {
+                        "dateStr": "2026-03-07",
+                        "energy": "84.2",
+                    }
+                ]
+            }
+
+    monkeypatch.setenv("SOLIS_KEY_ID", "key")
+    monkeypatch.setenv("SOLIS_KEY_SECRET", "secret")
+    monkeypatch.setattr(
+        "solar_platform.services.performance_copilot_asset_audit.requests.post",
+        lambda *args, **kwargs: FakeResponse(),
+    )
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text("{}", encoding="utf-8")
+    service = AssetRegisterAuditService(
+        notion_service=FakeNotionAssetRegisterService([]),
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={},
+    )
+
+    result = service._fetch_solis_day_energy("1298491919450070492", date(2026, 3, 7))
+
+    assert result == 84.2
+
+
 def test_emig_adapter_maps_iso_z_timestamps_with_microseconds() -> None:
     from solar_platform.ingestion.emig_adapter import EMIGAdapter
 
