@@ -65,6 +65,16 @@ app = FastAPI(
     description="Read-only API for solar portfolio data.",
 )
 
+# ---------------------------------------------------------------------------
+# Routers
+# ---------------------------------------------------------------------------
+try:
+    from api.routers.mobile import router as mobile_router
+
+    app.include_router(mobile_router, prefix="/api/v1", tags=["mobile"])
+except Exception as _router_exc:  # pragma: no cover
+    logger.warning("mobile_router_not_loaded", error=str(_router_exc))
+
 
 @app.get("/health", response_model=HealthResponse, tags=["system"])
 def health_check() -> HealthResponse:
