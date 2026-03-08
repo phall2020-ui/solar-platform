@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date, timedelta
+import json
 from types import SimpleNamespace
 
 import pandas as pd
@@ -23,6 +25,9 @@ class FakeWritableNotionAssetRegisterService(FakeNotionAssetRegisterService):
         self.database_ensures: list[tuple[str, dict[str, object], str | None]] = []
         self.database_property_ensures: list[tuple[str, dict[str, object]]] = []
         self.database_upserts: list[tuple[str, str, str, dict[str, object]]] = []
+        self.database_title_queries: list[str] = []
+        self.database_rows_by_id: dict[str, list[dict[str, object]]] = {}
+        self.database_rows_by_title: dict[str, list[dict[str, object]]] = {}
 
     def ensure_rich_text_property(self, property_name: str) -> bool:
         return self.ensure_property and property_name == "Data Source Match"
@@ -53,6 +58,13 @@ class FakeWritableNotionAssetRegisterService(FakeNotionAssetRegisterService):
     ) -> str | None:
         self.database_upserts.append((database_id, match_field, match_value, properties))
         return "page_triage"
+
+    def find_database_by_title(self, title: str) -> str | None:
+        self.database_title_queries.append(title)
+        return title if title in self.database_rows_by_title else None
+
+    def query_database_rows(self, database_id: str, filter_payload: dict[str, object] | None = None) -> list[dict[str, object]]:  # noqa: ARG002
+        return list(self.database_rows_by_id.get(database_id, []))
 
 
 class FakeChecker:
@@ -1206,6 +1218,164 @@ async def test_build_yesterday_dataset_marks_missing_identifier_and_unconfigured
 
 
 @pytest.mark.asyncio
+async def test_build_yesterday_dataset_populates_findings_and_rollups(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text(
+        """
+        {
+          "Newfold Farm": {
+            "platform": "juggle",
+            "juggle_uid": "ERS:00001"
+          }
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    notion = FakeNotionAssetRegisterService(
+        [
+            {
+                "Alias": "BAE Fylde",
+                "PAC Date": "2026-03-01",
+                "Data Source Match": "Newfold Farm",
+            },
+        ]
+    )
+
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={},
+        supported_sources=("juggle",),
+        daylight_metrics_fetcher=FakeDaylightMetricsFetcher(),
+    )
+
+    dataset = await service.build_yesterday_dataset(reference_date=date(2026, 3, 8))
+
+    row = dataset[0]
+    assert row["finding_types"] == ["source_unconfigured"]
+    assert row["actionable_finding_count"] == 1
+    assert row["highest_finding_severity"] == "medium"
+    assert row["findings"] == [
+        {
+            "finding_type": "source_unconfigured",
+            "severity": "medium",
+            "confidence": pytest.approx(0.8),
+            "summary": "The mapped source juggle could not be checked because credentials are missing.",
+            "recommended_action": "Configure credentials for juggle in the local environment or GitHub Actions and rerun the audit.",
+            "source": "juggle",
+            "context": {
+                "checked_sources": "juggle",
+                "match_method": "notion_override",
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_yesterday_dataset_adds_point_lane_stark_fusion_variance_finding(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text("{}", encoding="utf-8")
+
+    notion = FakeWritableNotionAssetRegisterService(
+        [
+            {
+                "Alias": "Point Lane Solar Farm",
+                "PAC Date": "2026-03-01",
+                "Huawei Station ID": "HUAWEI:POINT-LANE",
+            },
+        ]
+    )
+
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(notion_stark_daily_database_id="db_stark"),
+        legacy_mapping_path=mapping_path,
+        checkers={"huawei": FakeChecker("huawei", has_data=True)},
+        supported_sources=("huawei",),
+        daylight_metrics_fetcher=FakeDaylightMetricsFetcher(
+            {
+                "actual_daylight_kwh": 120.0,
+                "available_hh_periods": 10,
+                "daylight_hh_periods": 10,
+            }
+        ),
+    )
+    notion.database_rows_by_id["db_stark"] = [
+        {
+            "Date": "2026-03-07",
+            "Total kWh": 100.0,
+        }
+    ]
+
+    dataset = await service.build_yesterday_dataset(reference_date=date(2026, 3, 8))
+
+    row = dataset[0]
+    finding = next(item for item in row["findings"] if item["finding_type"] == "stark_fusion_variance")
+    assert finding["severity"] == "high"
+    assert finding["metrics"] == {
+        "fusion_kwh": pytest.approx(120.0),
+        "stark_kwh": pytest.approx(100.0),
+        "diff_kwh": pytest.approx(20.0),
+        "diff_pct": pytest.approx(20.0 / 120.0 * 100.0),
+    }
+
+
+@pytest.mark.asyncio
+async def test_build_triage_records_emits_one_row_per_finding(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text("{}", encoding="utf-8")
+
+    notion = FakeWritableNotionAssetRegisterService(
+        [
+            {
+                "Alias": "Point Lane Solar Farm",
+                "PAC Date": "2026-03-01",
+                "Huawei Station ID": "HUAWEI:POINT-LANE",
+            },
+        ]
+    )
+
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(notion_stark_daily_database_id="db_stark"),
+        legacy_mapping_path=mapping_path,
+        checkers={},
+        supported_sources=("huawei",),
+        daylight_metrics_fetcher=FakeDaylightMetricsFetcher(
+            {
+                "actual_daylight_kwh": 120.0,
+                "available_hh_periods": 10,
+                "daylight_hh_periods": 10,
+            }
+        ),
+    )
+    notion.database_rows_by_id["db_stark"] = [
+        {
+            "Date": "2026-03-07",
+            "Total kWh": 100.0,
+        }
+    ]
+
+    triage_records = await service.build_triage_records(reference_date=date(2026, 3, 8))
+
+    assert len(triage_records) == 2
+    finding_types = sorted(record["finding_type"] for record in triage_records)
+    assert finding_types == ["source_unconfigured", "stark_fusion_variance"]
+    for record in triage_records:
+        assert record["issue_type"] == record["finding_type"]
+        assert record["finding_summary"]
+        assert record["row_key"] == f"2026-03-07|Point Lane Solar Farm|{record['finding_type']}"
+
+
+@pytest.mark.asyncio
 async def test_build_yesterday_dataset_prefers_notion_override_before_fuzzy_match(tmp_path) -> None:
     from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
 
@@ -1426,6 +1596,7 @@ async def test_build_triage_records_creates_actionable_issue_and_email_draft(tmp
     assert len(triage_records) == 1
     record = triage_records[0]
     assert record["issue_type"] == "source_unconfigured"
+    assert record["finding_type"] == "source_unconfigured"
     assert record["severity"] == "medium"
     assert record["am_contact_name"] == "Alice Manager"
     assert record["am_contact_email"] == "alice@example.com"
@@ -1652,6 +1823,27 @@ def test_publish_daily_dataset_to_notion_uses_parent_page_and_upserts_rows(tmp_p
                 "sma_has_data": False,
                 "sma_sample_count": 0,
                 "sma_message": "",
+                "findings": [
+                    {
+                        "finding_type": "inverter_meter_comparison",
+                        "severity": "high",
+                        "confidence": 0.9,
+                        "summary": "Inverter total differs from PV meter total.",
+                        "recommended_action": "Review Juggle inverter and PV meter totals.",
+                        "metrics": {
+                            "inverter_kwh": 123.4,
+                            "meter_kwh": 120.0,
+                            "diff_kwh": 3.4,
+                            "diff_pct": 2.8333,
+                            "alert_label": "Critical",
+                            "platform": "solis",
+                            "solis_kwh": 121.0,
+                        },
+                    }
+                ],
+                "finding_types": ["inverter_meter_comparison"],
+                "actionable_finding_count": 1,
+                "highest_finding_severity": "high",
             },
             {
                 "asset_name": "No Data Site",
@@ -1708,6 +1900,8 @@ def test_publish_daily_dataset_to_notion_uses_parent_page_and_upserts_rows(tmp_p
     assert properties["Juggle Identifier"] == {"rich_text": [{"text": {"content": "AMP:00001"}}]}
     assert properties["Juggle Has Data"] == {"checkbox": True}
     assert properties["Availability (%)"] == {"number": pytest.approx(17 / 18)}
+    daily_json = properties["Daily JSON"]["rich_text"][0]["text"]["content"]
+    assert "\"finding_type\": \"inverter_meter_comparison\"" in daily_json
     assert properties["PR (%)"] == {"number": pytest.approx(123.4 / 150.0)}
     assert properties["PPA Rate (GBP/MWh)"] == {"number": 95.0}
     assert properties["PPA Rate Source"] == {
@@ -1834,3 +2028,48 @@ def test_emig_adapter_maps_import_active_power_watts_to_kw() -> None:
     assert reading is not None
     assert reading.timestamp.isoformat() == "2026-03-07T06:45:00+00:00"
     assert reading.power_kw == pytest.approx(3.003)
+
+
+@pytest.mark.asyncio
+async def test_emig_adapter_fetch_readings_uses_bounded_device_concurrency(monkeypatch) -> None:
+    from datetime import UTC, datetime
+
+    from solar_platform.ingestion.emig_adapter import EMIGAdapter
+
+    adapter = EMIGAdapter(api_key="dummy", rate_limit_rpm=1000, max_concurrent_devices=2)
+
+    async def fake_get(path, params=None):  # noqa: ANN001
+        assert params is None
+        assert path == "/plant/ERS:00001"
+        return {
+            "meters": [
+                {"type": "INVERTER", "emigId": "INV:1"},
+                {"type": "INVERTER", "emigId": "INV:2"},
+                {"type": "INVERTER", "emigId": "INV:3"},
+            ]
+        }
+
+    active = 0
+    peak = 0
+    seen_devices: list[str] = []
+
+    async def fake_fetch_device_readings(batch, plant_uid, emig_id, start, end):  # noqa: ANN001
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        seen_devices.append(emig_id)
+        await asyncio.sleep(0.01)
+        active -= 1
+
+    monkeypatch.setattr(adapter, "_get", fake_get)
+    monkeypatch.setattr(adapter, "_fetch_device_readings", fake_fetch_device_readings)
+
+    batch = await adapter.fetch_readings(
+        "ERS:00001",
+        datetime(2026, 3, 7, tzinfo=UTC),
+        datetime(2026, 3, 8, tzinfo=UTC),
+    )
+
+    assert batch.errors == []
+    assert sorted(seen_devices) == ["INV:1", "INV:2", "INV:3"]
+    assert peak == 2

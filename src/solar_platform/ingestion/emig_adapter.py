@@ -14,6 +14,7 @@ Environment variables / config:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -51,6 +52,7 @@ MAX_DAYS_PER_CHUNK = 90          # API returns 413 if too much data is requested
 RATE_LIMIT_RPM = 60              # conservative requests-per-minute
 INTERVAL_SECONDS = 900           # 15-minute data resolution (default)
 MIN_INTERVAL_S = 900             # minimum interval supported by EMIG API
+MAX_CONCURRENT_DEVICES = 4
 
 # ---------------------------------------------------------------------------
 # Field mapping: EMIG payload → Reading
@@ -123,12 +125,14 @@ class EMIGAdapter(DataSourceAdapter):
         base_url: str = DEFAULT_BASE_URL,
         min_interval_s: int = MIN_INTERVAL_S,
         rate_limit_rpm: int = RATE_LIMIT_RPM,
+        max_concurrent_devices: int = MAX_CONCURRENT_DEVICES,
         timeout_s: float = 60.0,
     ) -> None:
         super().__init__()
         self.api_key = api_key or os.getenv("EMIG_API_KEY") or os.getenv("JUGGLE_API_KEY", "")
         self.base_url = base_url.rstrip("/")
         self.min_interval_s = min_interval_s
+        self.max_concurrent_devices = max(1, int(max_concurrent_devices))
         self.timeout = httpx.Timeout(timeout_s, connect=15.0)
         self._rate_limiter = _RateLimiter(rate_limit_rpm)
         self._client: httpx.AsyncClient | None = None
@@ -223,9 +227,20 @@ class EMIGAdapter(DataSourceAdapter):
                 batch.warnings.append(f"No inverters found for plant {plant_uid}")
                 return batch.finalize()
 
-            # 2. Fetch readings per device, chunked by date
-            for emig_id in inverter_ids:
-                await self._fetch_device_readings(batch, plant_uid, emig_id, start, end)
+            # 2. Fetch readings per device, chunked by date.
+            semaphore = asyncio.Semaphore(self.max_concurrent_devices)
+
+            async def _fetch_with_semaphore(emig_id: str) -> None:
+                async with semaphore:
+                    await self._fetch_device_readings(batch, plant_uid, emig_id, start, end)
+
+            results = await asyncio.gather(
+                *(_fetch_with_semaphore(emig_id) for emig_id in inverter_ids),
+                return_exceptions=True,
+            )
+            for emig_id, result in zip(inverter_ids, results):
+                if isinstance(result, Exception):
+                    batch.errors.append(f"{emig_id} fetch error: {result}")
 
         except httpx.HTTPStatusError as exc:
             batch.errors.append(f"HTTP {exc.response.status_code}: {exc.response.text[:200]}")
@@ -299,6 +314,10 @@ class EMIGAdapter(DataSourceAdapter):
             return None
 
         mapped = apply_field_mappings(raw, EMIG_FIELD_MAPPINGS)
+        import_active_power = ((raw.get("importActivePower") or {}).get("value")
+                               if isinstance(raw.get("importActivePower"), dict) else None)
+        if mapped.get("power_kw") in (None, 0, 0.0) and import_active_power is not None:
+            mapped["power_kw"] = float(import_active_power) / 1000.0
         parsed_timestamp = self._parse_timestamp(ts_raw)
         if parsed_timestamp is None:
             self.log.debug("emig_map_error", device=emig_id, ts=ts_raw, error="unparseable timestamp")
