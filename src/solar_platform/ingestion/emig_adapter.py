@@ -21,6 +21,7 @@ from typing import Any, ClassVar
 
 import httpx
 import structlog
+from dateutil import parser as date_parser
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -298,10 +299,14 @@ class EMIGAdapter(DataSourceAdapter):
             return None
 
         mapped = apply_field_mappings(raw, EMIG_FIELD_MAPPINGS)
+        parsed_timestamp = self._parse_timestamp(ts_raw)
+        if parsed_timestamp is None:
+            self.log.debug("emig_map_error", device=emig_id, ts=ts_raw, error="unparseable timestamp")
+            return None
 
         try:
             reading = Reading(
-                timestamp=ts_raw,
+                timestamp=parsed_timestamp,
                 plant_uid=plant_uid,
                 device_id=emig_id,
                 source=self.source_name,
@@ -317,6 +322,23 @@ class EMIGAdapter(DataSourceAdapter):
         except Exception as exc:
             self.log.debug("emig_map_error", device=emig_id, ts=ts_raw, error=str(exc))
             return None
+
+    def _parse_timestamp(self, value: Any) -> datetime | None:
+        if isinstance(value, datetime):
+            return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+        text = str(value).strip()
+        if not text:
+            return None
+
+        normalised = text.replace("Z", "+00:00")
+        for candidate in (normalised, text):
+            try:
+                parsed = date_parser.isoparse(candidate)
+                return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                continue
+        return None
 
     async def list_available_plants(self) -> list[dict[str, Any]]:
         """

@@ -673,7 +673,7 @@ class SolisDailyChecker:
     def __init__(self) -> None:
         self.key_id = os.getenv("SOLIS_KEY_ID", "")
         self.key_secret = os.getenv("SOLIS_KEY_SECRET", "")
-        self.base_url = os.getenv("SOLIS_API_URL", "https://www.soliscloud.com:13333")
+        self.base_url = (os.getenv("SOLIS_API_URL") or "https://www.soliscloud.com:13333").rstrip("/")
 
     async def check_day(self, identifier: str, target_date: date) -> SourceCheckResult:
         if not self.key_id or not self.key_secret:

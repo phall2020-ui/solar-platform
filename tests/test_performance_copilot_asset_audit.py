@@ -618,3 +618,29 @@ async def test_solaredge_daily_checker_reports_unconfigured_when_site_key_missin
     assert result.status == "unconfigured"
     assert result.has_data is False
     assert "missing site-specific API key" in result.message
+
+
+def test_solis_daily_checker_uses_default_base_url_when_env_is_empty(monkeypatch) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import SolisDailyChecker
+
+    monkeypatch.setenv("SOLIS_API_URL", "")
+    checker = SolisDailyChecker()
+
+    assert checker.base_url == "https://www.soliscloud.com:13333"
+
+
+def test_emig_adapter_maps_iso_z_timestamps_with_microseconds() -> None:
+    from solar_platform.ingestion.emig_adapter import EMIGAdapter
+
+    adapter = EMIGAdapter(api_key="dummy")
+    raw = {
+        "ts": "2026-03-07T00:00:00.000000Z",
+        "activePower": {"value": 1200},
+        "energy": {"value": 3400},
+    }
+
+    reading = adapter._map_reading(raw, plant_uid="ERS:00001", emig_id="INVERT:001")
+
+    assert reading is not None
+    assert reading.timestamp.isoformat() == "2026-03-07T00:00:00+00:00"
+    assert reading.power_kw == pytest.approx(1200)
