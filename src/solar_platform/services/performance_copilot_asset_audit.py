@@ -1257,35 +1257,43 @@ class RepositoryDaylightMetricsFetcher:
         forecast_df = pd.DataFrame(columns=["hh_ts", "poa_interval_kwh_m2", "poa_wm2"])
         week_start = reference_date - timedelta(days=reference_date.weekday())
         week_end = week_start + timedelta(days=6)
+        weather_errors: list[str] = []
         if week_end >= self.runtime_today:
-            forecast_df = await self.forecast_irradiance_fetcher.fetch_half_hourly(
-                latitude=float(location.latitude),
-                longitude=float(location.longitude),
-                timezone=str(location.timezone),
-                tilt_deg=float(location.tilt_deg),
-                azimuth_deg=float(location.azimuth_deg),
-                site_name=str(location.name),
-            )
+            try:
+                forecast_df = await self.forecast_irradiance_fetcher.fetch_half_hourly(
+                    latitude=float(location.latitude),
+                    longitude=float(location.longitude),
+                    timezone=str(location.timezone),
+                    tilt_deg=float(location.tilt_deg),
+                    azimuth_deg=float(location.azimuth_deg),
+                    site_name=str(location.name),
+                )
+            except Exception as exc:
+                weather_errors.append(f"Forecast weather fetch failed: {exc}")
 
         yesterday_date = reference_date - timedelta(days=1)
-        yesterday_gen, yesterday_source = self._compute_target_for_date(
+        yesterday_gen, yesterday_source, yesterday_error = self._safe_compute_target_for_date(
             target_date=yesterday_date,
             location=location,
             capacity_kwp=capacity,
             forecast_df=forecast_df,
         )
-        today_gen, today_source = self._compute_target_for_date(
+        today_gen, today_source, today_error = self._safe_compute_target_for_date(
             target_date=reference_date,
             location=location,
             capacity_kwp=capacity,
             forecast_df=forecast_df,
         )
+        if yesterday_error:
+            weather_errors.append(yesterday_error)
+        if today_error:
+            weather_errors.append(today_error)
 
         week_gen_total = 0.0
         week_sources: set[str] = set()
         for day_offset in range(7):
             current_date = week_start + timedelta(days=day_offset)
-            day_gen, day_source = self._compute_target_for_date(
+            day_gen, day_source, day_error = self._safe_compute_target_for_date(
                 target_date=current_date,
                 location=location,
                 capacity_kwp=capacity,
@@ -1295,6 +1303,8 @@ class RepositoryDaylightMetricsFetcher:
                 week_gen_total += day_gen
             if day_source:
                 week_sources.add(day_source)
+            if day_error:
+                weather_errors.append(day_error)
 
         metrics["target_gen_yesterday_kwh"] = yesterday_gen
         metrics["target_weather_yesterday"] = yesterday_source
@@ -1302,10 +1312,21 @@ class RepositoryDaylightMetricsFetcher:
         metrics["target_weather_today"] = today_source
         metrics["target_gen_week_kwh"] = week_gen_total
         metrics["target_weather_week"] = "+".join(sorted(week_sources))
+        if weather_errors:
+            unique_errors: list[str] = []
+            seen_errors: set[str] = set()
+            for error in weather_errors:
+                if error and error not in seen_errors:
+                    seen_errors.add(error)
+                    unique_errors.append(error)
+            metrics["target_revenue_message"] = " | ".join(unique_errors)
 
         rate = _coerce_float(ppa_rate_gbp_mwh)
         if rate is None:
-            metrics["target_revenue_message"] = "Missing PPA rate in asset register."
+            if metrics["target_revenue_message"]:
+                metrics["target_revenue_message"] += " | Missing PPA rate in asset register."
+            else:
+                metrics["target_revenue_message"] = "Missing PPA rate in asset register."
             return metrics
 
         if yesterday_gen is not None:
@@ -1314,6 +1335,28 @@ class RepositoryDaylightMetricsFetcher:
             metrics["target_revenue_today_gbp"] = (today_gen / 1000.0) * rate
         metrics["target_revenue_week_gbp"] = (week_gen_total / 1000.0) * rate
         return metrics
+
+    def _safe_compute_target_for_date(
+        self,
+        *,
+        target_date: date,
+        location: Any,
+        capacity_kwp: float,
+        forecast_df: pd.DataFrame,
+    ) -> tuple[float | None, str, str]:
+        try:
+            generation_kwh, weather_source = self._compute_target_for_date(
+                target_date=target_date,
+                location=location,
+                capacity_kwp=capacity_kwp,
+                forecast_df=forecast_df,
+            )
+            return generation_kwh, weather_source, ""
+        except Exception as exc:
+            weather_source = "archive" if target_date < self.runtime_today else "forecast"
+            return None, weather_source, (
+                f"{weather_source.capitalize()} weather fetch failed for {target_date.isoformat()}: {exc}"
+            )
 
     def _resolve_plant_uid(
         self,

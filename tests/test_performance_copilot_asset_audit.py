@@ -149,6 +149,16 @@ class FakeArchiveIrradianceFetcherByDate:
         return pd.DataFrame(self.rows_by_date.get(kwargs["target_date"], []))
 
 
+class FakeArchiveIrradianceFetcherRaising:
+    def __init__(self, message: str) -> None:
+        self.message = message
+        self.calls: list[dict[str, object]] = []
+
+    def fetch_half_hourly(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        raise RuntimeError(self.message)
+
+
 class FakeForecastIrradianceFetcher:
     def __init__(self, rows: list[dict[str, object]]) -> None:
         self.rows = rows
@@ -307,6 +317,49 @@ async def test_repository_daylight_metrics_fetcher_builds_target_generation_and_
     assert metrics["target_gen_week_kwh"] == pytest.approx(68.0)
     assert metrics["target_revenue_week_gbp"] == pytest.approx(6.12)
     assert metrics["target_weather_week"] == "archive+forecast"
+
+
+@pytest.mark.asyncio
+async def test_repository_daylight_metrics_fetcher_degrades_gracefully_when_archive_weather_times_out() -> None:
+    from solar_platform.services.performance_copilot_asset_audit import RepositoryDaylightMetricsFetcher
+
+    fetcher = RepositoryDaylightMetricsFetcher(
+        plant_repository=FakePlantRepository([]),
+        readings_repository=FakeReadingsRepository([]),
+        site_location_service=SimpleNamespace(
+            get_site=lambda name: SimpleNamespace(
+                name=name,
+                latitude=53.0,
+                longitude=-2.0,
+                tilt_deg=20.0,
+                azimuth_deg=180.0,
+                timezone="Europe/London",
+            ),
+            get_all_sites=lambda: [],
+        ),
+        archive_irradiance_fetcher=FakeArchiveIrradianceFetcherRaising("Request timed out"),
+        forecast_irradiance_fetcher=FakeForecastIrradianceFetcher(
+            [{"hh_ts": "2026-03-08T12:00:00Z", "poa_interval_kwh_m2": 0.20, "poa_wm2": 400.0}]
+        ),
+        runtime_today=date(2026, 3, 8),
+    )
+
+    metrics = await fetcher.get_target_metrics(
+        reference_date=date(2026, 3, 8),
+        capacity_kwp=100.0,
+        ppa_rate_gbp_mwh=90.0,
+        asset_name="Park Hall",
+        match_name="PPA Park Hall",
+    )
+
+    assert metrics["target_gen_yesterday_kwh"] is None
+    assert metrics["target_revenue_yesterday_gbp"] is None
+    assert metrics["target_gen_today_kwh"] == pytest.approx(16.0)
+    assert metrics["target_revenue_today_gbp"] == pytest.approx(1.44)
+    assert metrics["target_gen_week_kwh"] == pytest.approx(16.0)
+    assert metrics["target_revenue_week_gbp"] == pytest.approx(1.44)
+    assert metrics["target_weather_today"] == "forecast"
+    assert "Archive weather fetch failed for 2026-03-07: Request timed out" in metrics["target_revenue_message"]
 
 @pytest.mark.asyncio
 async def test_build_yesterday_dataset_uses_mapping_and_check_results(tmp_path) -> None:
