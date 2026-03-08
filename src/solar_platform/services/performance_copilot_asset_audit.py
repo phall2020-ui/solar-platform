@@ -1143,8 +1143,13 @@ class RepositoryDaylightMetricsFetcher:
             asset_name=asset_name,
         )
         irr_df = pd.DataFrame(columns=["hh_ts", "poa_interval_kwh_m2", "poa_wm2"])
+        irradiance_errors: list[str] = []
         if plant_uid:
-            irr_df = self._load_repo_poa_series(plant_uid, target_date)
+            try:
+                irr_df = self._load_repo_poa_series(plant_uid, target_date)
+            except Exception as exc:
+                irradiance_errors.append(f"Repo POA lookup failed: {exc}")
+                irr_df = pd.DataFrame(columns=["hh_ts", "poa_interval_kwh_m2", "poa_wm2"])
             if not irr_df.empty:
                 metrics["irradiance_source"] = "repo_solargis_weighted_poa"
                 metrics["irradiance_device_id"] = "POA:SOLARGIS:WEIGHTED"
@@ -1152,24 +1157,31 @@ class RepositoryDaylightMetricsFetcher:
         if irr_df.empty:
             location = self._resolve_site_location(match_name=match_name, asset_name=asset_name)
             if location is not None:
-                irr_df = self.archive_irradiance_fetcher.fetch_half_hourly(
-                    target_date=target_date,
-                    latitude=float(location.latitude),
-                    longitude=float(location.longitude),
-                    timezone=str(location.timezone),
-                    tilt_deg=float(location.tilt_deg),
-                    azimuth_deg=float(location.azimuth_deg),
-                )
+                try:
+                    irr_df = self.archive_irradiance_fetcher.fetch_half_hourly(
+                        target_date=target_date,
+                        latitude=float(location.latitude),
+                        longitude=float(location.longitude),
+                        timezone=str(location.timezone),
+                        tilt_deg=float(location.tilt_deg),
+                        azimuth_deg=float(location.azimuth_deg),
+                    )
+                except Exception as exc:
+                    irradiance_errors.append(f"Archive irradiance fetch failed: {exc}")
+                    irr_df = pd.DataFrame(columns=["hh_ts", "poa_interval_kwh_m2", "poa_wm2"])
                 if not irr_df.empty:
                     metrics["irradiance_source"] = "openmeteo_archive_gti"
                     metrics["irradiance_device_id"] = location.name
 
         if irr_df.empty:
-            metrics["irradiance_message"] = (
+            base_message = (
                 "No irradiance data found for the target day."
                 if plant_uid
                 else "No plant or site-location match found for irradiance lookup."
             )
+            if irradiance_errors:
+                base_message = " | ".join([base_message, *irradiance_errors])
+            metrics["irradiance_message"] = base_message
             return metrics
 
         daylight_df = irr_df[irr_df["poa_wm2"] > self.irradiance_threshold_wm2].copy()
