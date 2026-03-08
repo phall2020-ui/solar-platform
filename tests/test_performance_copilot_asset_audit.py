@@ -25,6 +25,7 @@ class FakeWritableNotionAssetRegisterService(FakeNotionAssetRegisterService):
         self.database_ensures: list[tuple[str, dict[str, object], str | None]] = []
         self.database_property_ensures: list[tuple[str, dict[str, object]]] = []
         self.database_upserts: list[tuple[str, str, str, dict[str, object]]] = []
+        self.database_creates: list[tuple[str, dict[str, object]]] = []
         self.database_title_queries: list[str] = []
         self.database_rows_by_id: dict[str, list[dict[str, object]]] = {}
         self.database_rows_by_title: dict[str, list[dict[str, object]]] = {}
@@ -58,6 +59,14 @@ class FakeWritableNotionAssetRegisterService(FakeNotionAssetRegisterService):
     ) -> str | None:
         self.database_upserts.append((database_id, match_field, match_value, properties))
         return "page_triage"
+
+    def create_database_page(
+        self,
+        database_id: str,
+        properties: dict[str, object],
+    ) -> str | None:
+        self.database_creates.append((database_id, properties))
+        return "page_daily"
 
     def find_database_by_title(self, title: str) -> str | None:
         self.database_title_queries.append(title)
@@ -1706,7 +1715,7 @@ async def test_publish_triage_records_to_notion_ensures_database_and_upserts_row
     assert properties["AM Email Draft"] == {"rich_text": [{"text": {"content": "Draft body"}}]}
 
 
-def test_publish_daily_dataset_to_notion_uses_parent_page_and_upserts_rows(tmp_path) -> None:
+def test_publish_daily_dataset_to_notion_uses_parent_page_and_appends_rows(tmp_path) -> None:
     from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
 
     mapping_path = tmp_path / "mapping.json"
@@ -1889,11 +1898,11 @@ def test_publish_daily_dataset_to_notion_uses_parent_page_and_upserts_rows(tmp_p
     assert notion.database_ensures[0][0] == "Daily JSON"
     assert notion.database_ensures[0][2] == "page_daily_json"
     assert notion.database_property_ensures[0][0] == "db_triage"
-    assert len(notion.database_upserts) == 1
-    database_id, match_field, match_value, properties = notion.database_upserts[0]
+    assert notion.database_upserts == []
+    assert len(notion.database_creates) == 1
+    database_id, properties = notion.database_creates[0]
     assert database_id == "db_triage"
-    assert match_field == "Row Key"
-    assert match_value == "2026-03-07|Cromwell Tools"
+    assert properties["Row Key"] == {"rich_text": [{"text": {"content": "2026-03-07|Cromwell Tools"}}]}
     assert properties["PAC Date"] == {"date": None}
     assert properties["PAC Phase"] == {"rich_text": [{"text": {"content": "unknown"}}]}
     assert properties["Has Any Data"] == {"checkbox": True}
@@ -1945,6 +1954,66 @@ def test_publish_daily_dataset_to_notion_uses_parent_page_and_upserts_rows(tmp_p
             }
         ]
     }
+
+
+def test_publish_daily_dataset_to_notion_republishes_same_row_key_as_new_row(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text("{}", encoding="utf-8")
+
+    notion = FakeWritableNotionAssetRegisterService([])
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={},
+    )
+
+    row = {
+        "asset_name": "Cromwell Tools",
+        "target_date": "2026-03-07",
+        "pac_date": "",
+        "pac_phase": "unknown",
+        "pac_in_past": False,
+        "pac_date_missing": True,
+        "has_any_data": True,
+        "sources_with_data": "juggle",
+        "preferred_source": "juggle",
+        "checked_sources": "juggle",
+        "match_name": "Cromwell Tools",
+        "match_method": "notion_override",
+        "match_confidence": 1.0,
+        "resolved_source_types": "juggle",
+        "resolution_notes": "Used Data Source Match override from Notion.",
+        "project_name": "Cromwell Tools",
+        "customer_name": "Cromwell",
+        "spv": "",
+        "priority": "",
+        "site_address": "Somewhere",
+        "am_contact_name": "Alice Manager",
+        "am_contact_email": "alice@example.com",
+        "notion_page_id": "page_123",
+        "notion_url": "https://www.notion.so/asset",
+        "juggle_identifier": "AMP:00001",
+        "juggle_status": "ok",
+        "juggle_has_data": True,
+        "juggle_sample_count": 96,
+        "juggle_message": "",
+        "findings": [],
+        "finding_types": [],
+        "actionable_finding_count": 0,
+        "highest_finding_severity": "",
+    }
+
+    first = service.publish_daily_dataset_to_notion([row], parent_page_id="page_daily_json")
+    second = service.publish_daily_dataset_to_notion([row], database_id=first["database_id"])
+
+    assert first["published"] == 1
+    assert second["published"] == 1
+    assert notion.database_upserts == []
+    assert len(notion.database_creates) == 2
+    assert notion.database_creates[0][1]["Row Key"] == notion.database_creates[1][1]["Row Key"]
 
 
 @pytest.mark.asyncio

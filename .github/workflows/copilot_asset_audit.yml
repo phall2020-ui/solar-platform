@@ -11,6 +11,8 @@ on:
         description: "Optional case-insensitive asset filter."
         required: false
         default: ""
+  schedule:
+    - cron: "0 4 * * *"
   push:
     branches:
       - "**"
@@ -42,6 +44,8 @@ jobs:
       SOLIS_KEY_SECRET: ${{ secrets.SOLIS_KEY_SECRET }}
       SOLAREDGE_KEYS_JSON: ${{ secrets.SOLAREDGE_KEYS_JSON }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      NOTION_DAILY_JSON_DATABASE_ID: ${{ secrets.NOTION_DAILY_JSON_DATABASE_ID }}
+      NOTION_DAILY_JSON_PARENT_PAGE_ID: ${{ secrets.NOTION_DAILY_JSON_PARENT_PAGE_ID }}
       OUTPUT_DIR: ${{ github.workspace }}/tools/performance-intelligence-copilot/output
       REFERENCE_DATE: ${{ inputs.reference_date }}
       ASSET_FILTER: ${{ inputs.asset_filter }}
@@ -123,6 +127,24 @@ jobs:
             args+=(--asset-filter "$ASSET_FILTER")
           fi
           python "${args[@]}" > "$OUTPUT_DIR/triage_publish_summary.txt"
+
+      - name: Publish daily output to Notion
+        if: env.NOTION_DAILY_JSON_DATABASE_ID != '' || env.NOTION_DAILY_JSON_PARENT_PAGE_ID != ''
+        run: |
+          args=(tools/performance-intelligence-copilot/main.py --mode asset-register-publish-daily --output-dir "$OUTPUT_DIR" --force-refresh)
+          if [ -n "$REFERENCE_DATE" ]; then
+            args+=(--reference-date "$REFERENCE_DATE")
+          fi
+          if [ -n "$ASSET_FILTER" ]; then
+            args+=(--asset-filter "$ASSET_FILTER")
+          fi
+          if [ -n "$NOTION_DAILY_JSON_DATABASE_ID" ]; then
+            args+=(--daily-json-database-id "$NOTION_DAILY_JSON_DATABASE_ID")
+          fi
+          if [ -n "$NOTION_DAILY_JSON_PARENT_PAGE_ID" ]; then
+            args+=(--daily-json-parent-page-id "$NOTION_DAILY_JSON_PARENT_PAGE_ID")
+          fi
+          python "${args[@]}" > "$OUTPUT_DIR/daily_publish_summary.txt"
 
       - name: Build workflow summary
         run: |

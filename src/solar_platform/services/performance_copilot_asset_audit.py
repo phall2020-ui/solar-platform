@@ -153,6 +153,16 @@ DEFAULT_CONFIRMED_SOURCE_REGISTRY: dict[str, dict[str, str]] = {
 TRIAGE_DATABASE_TITLE = "Solar Copilot Daily Triage"
 
 DAILY_JSON_DATABASE_TITLE = "Daily JSON"
+STARK_DAILY_DATABASE_TITLE = "Stark HH Daily Data"
+STARK_FUSION_VARIANCE_THRESHOLD_PCT = 8.0
+INVERTER_METER_ALERT_CRITICAL_PCT = 5.0
+SEVERITY_RANK: dict[str, int] = {
+    "info": 0,
+    "low": 1,
+    "medium": 2,
+    "high": 3,
+    "critical": 4,
+}
 
 TRIAGE_DATABASE_PROPERTIES: dict[str, dict[str, Any]] = {
     "Asset": {"title": {}},
@@ -667,6 +677,37 @@ def _date_property(value: Any) -> dict[str, Any]:
 def _number_property(value: Any) -> dict[str, Any]:
     numeric = _coerce_float(value)
     return {"number": numeric}
+
+
+def _severity_sort_key(value: Any) -> int:
+    return SEVERITY_RANK.get(str(value or "").strip().casefold(), -1)
+
+
+def _build_finding(
+    *,
+    finding_type: str,
+    severity: str,
+    confidence: float,
+    summary: str,
+    recommended_action: str,
+    source: str | None = None,
+    context: dict[str, Any] | None = None,
+    metrics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    finding: dict[str, Any] = {
+        "finding_type": finding_type,
+        "severity": severity,
+        "confidence": confidence,
+        "summary": summary,
+        "recommended_action": recommended_action,
+    }
+    if source:
+        finding["source"] = source
+    if context:
+        finding["context"] = context
+    if metrics:
+        finding["metrics"] = metrics
+    return finding
 
 
 def _derive_pac_phase(pac_date: date | None, as_of_date: date) -> str:
@@ -1946,6 +1987,516 @@ class AssetRegisterAuditService:
 
         return [source for source in ordered if source in self.supported_sources]
 
+    def _select_metrics_source(
+        self,
+        *,
+        source_results: dict[str, SourceCheckResult],
+        candidate_sources: list[str],
+        identifiers: dict[str, str],
+    ) -> str:
+        preferred_sources = [
+            source
+            for source in candidate_sources
+            if source_results.get(source) is not None and source_results[source].has_data
+        ]
+        if preferred_sources:
+            return preferred_sources[0]
+        for source in candidate_sources:
+            if identifiers.get(source):
+                return source
+        return ""
+
+    def _is_point_lane_asset(self, row: dict[str, Any]) -> bool:
+        candidates = (
+            row.get("asset_name", ""),
+            row.get("project_name", ""),
+            row.get("match_name", ""),
+        )
+        return any("point lane" in _normalise_key(value) for value in candidates if value)
+
+    def _resolve_stark_daily_database_id(self) -> str:
+        configured = str(getattr(self.settings, "notion_stark_daily_database_id", "") or "").strip()
+        if configured:
+            return configured
+        finder = getattr(self.notion_service, "find_database_by_title", None)
+        if callable(finder):
+            return str(finder(STARK_DAILY_DATABASE_TITLE) or "").strip()
+        return ""
+
+    def _lookup_stark_daily_total(self, target_date: date) -> float | None:
+        database_id = self._resolve_stark_daily_database_id()
+        if not database_id:
+            return None
+        query_rows = getattr(self.notion_service, "query_database_rows", None)
+        if not callable(query_rows):
+            return None
+        rows = query_rows(
+            database_id,
+            filter_payload={
+                "filter": {
+                    "property": "Date",
+                    "date": {"equals": target_date.isoformat()},
+                }
+            },
+        )
+        for row in rows:
+            row_date = _coerce_date(row.get("Date") or row.get("Settlement Date"))
+            if row_date != target_date:
+                continue
+            total_kwh = _coerce_float(row.get("Total kWh"))
+            if total_kwh is not None:
+                return total_kwh
+        return None
+
+    def _build_stark_fusion_variance_finding(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        if not self._is_point_lane_asset(row):
+            return None
+        fusion_kwh = _coerce_float(row.get("actual_daylight_kwh"))
+        if fusion_kwh is None or fusion_kwh <= 0:
+            return None
+        target_date = _coerce_date(row.get("target_date"))
+        if target_date is None:
+            return None
+        stark_kwh = self._lookup_stark_daily_total(target_date)
+        if stark_kwh is None:
+            return None
+        diff_kwh = fusion_kwh - stark_kwh
+        if fusion_kwh <= 0:
+            return None
+        diff_pct = abs(diff_kwh) / fusion_kwh * 100.0
+        if diff_pct <= STARK_FUSION_VARIANCE_THRESHOLD_PCT:
+            return None
+        return _build_finding(
+            finding_type="stark_fusion_variance",
+            severity="high",
+            confidence=0.9,
+            summary="Stark total differs materially from FusionSolar total for the target day.",
+            recommended_action="Check the Stark HH total against the Point Lane FusionSolar day total and confirm whether the discrepancy is expected.",
+            source="stark",
+            metrics={
+                "fusion_kwh": fusion_kwh,
+                "stark_kwh": stark_kwh,
+                "diff_kwh": diff_kwh,
+                "diff_pct": diff_pct,
+            },
+        )
+
+    def _juggle_api_key(self) -> str:
+        candidates = (
+            getattr(self.settings, "effective_api_key", ""),
+            getattr(self.settings, "juggle_api_key", ""),
+            getattr(self.settings, "emig_api_key", ""),
+            os.getenv("JUGGLE_API_KEY", ""),
+            os.getenv("EMIG_API_KEY", ""),
+        )
+        for candidate in candidates:
+            value = str(candidate or "").strip()
+            if value:
+                return value
+        return ""
+
+    def _juggle_base_url(self) -> str:
+        return (
+            str(os.getenv("EMIG_API_URL") or os.getenv("JUGGLE_API_URL") or "https://www.emig.co.uk/p/api")
+            .rstrip("/")
+        )
+
+    def _request_juggle_json(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
+        api_key = self._juggle_api_key()
+        if not api_key:
+            return None
+        response = requests.get(
+            f"{self._juggle_base_url()}{path}",
+            headers={"Authorization": f"token {api_key}"},
+            params=params,
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def _fetch_juggle_device_ids(self, plant_uid: str) -> tuple[list[str], list[str]]:
+        details = self._request_juggle_json(f"/plant/{plant_uid}")
+        if not isinstance(details, dict):
+            return [], []
+        meters = details.get("meters", [])
+        if not isinstance(meters, list):
+            return [], []
+        inverter_ids = [
+            str(meter.get("emigId", "")).strip()
+            for meter in meters
+            if isinstance(meter, dict) and meter.get("type") == "INVERTER" and str(meter.get("emigId", "")).strip()
+        ]
+        pv_meter_ids = [
+            str(meter.get("emigId", "")).strip()
+            for meter in meters
+            if isinstance(meter, dict) and meter.get("type") == "PV" and str(meter.get("emigId", "")).strip()
+        ]
+        return inverter_ids, pv_meter_ids
+
+    def _fetch_juggle_device_readings(self, emig_id: str, target_date: date) -> list[dict[str, Any]]:
+        payload = self._request_juggle_json(
+            f"/meter/{emig_id}/readings",
+            params={
+                "startDate": target_date.strftime("%Y%m%d"),
+                "endDate": target_date.strftime("%Y%m%d"),
+                "minIntervalS": 1800,
+            },
+        )
+        if isinstance(payload, dict):
+            readings = payload.get("readings", [])
+            return readings if isinstance(readings, list) else []
+        return payload if isinstance(payload, list) else []
+
+    def _normalise_juggle_readings(self, device_id: str, readings: list[dict[str, Any]]) -> pd.DataFrame:
+        rows: list[dict[str, Any]] = []
+        for reading in readings:
+            if not isinstance(reading, dict):
+                continue
+            timestamp = pd.to_datetime(reading.get("ts") or reading.get("timestamp"), utc=True, errors="coerce")
+            if pd.isna(timestamp):
+                continue
+
+            def _raw_value(name: str) -> float | None:
+                raw = reading.get(name)
+                if isinstance(raw, dict):
+                    return _coerce_float(raw.get("value"))
+                return _coerce_float(raw)
+
+            rows.append(
+                {
+                    "device_id": device_id,
+                    "timestamp": timestamp,
+                    "importEnergy": _raw_value("importEnergy"),
+                    "exportEnergy": _raw_value("exportEnergy"),
+                    "importActivePower": _raw_value("importActivePower"),
+                }
+            )
+        return pd.DataFrame(rows)
+
+    def _counter_total_kwh(self, df: pd.DataFrame, column: str) -> float:
+        if df.empty or column not in df.columns:
+            return 0.0
+        work = df.copy()
+        work[column] = pd.to_numeric(work[column], errors="coerce")
+        work = work.dropna(subset=[column])
+        if work.empty:
+            return 0.0
+        grouped = work.groupby("device_id")[column].agg(["min", "max"]).reset_index()
+        grouped["energy_wh"] = grouped["max"] - grouped["min"]
+        grouped.loc[grouped["energy_wh"] < 0, "energy_wh"] = 0.0
+        return float(grouped["energy_wh"].sum() / 1000.0)
+
+    def _positive_power_total_kwh(self, df: pd.DataFrame, column: str) -> float:
+        if df.empty or column not in df.columns:
+            return 0.0
+        work = df.copy()
+        work[column] = pd.to_numeric(work[column], errors="coerce")
+        work = work.dropna(subset=[column])
+        work = work[work[column] > 0]
+        if work.empty:
+            return 0.0
+        grouped = work.groupby("device_id")[column].sum().reset_index()
+        return float(grouped[column].sum() * 0.5 / 1000.0)
+
+    def _fetch_juggle_inverter_meter_totals(
+        self,
+        plant_uid: str,
+        target_date: date,
+    ) -> tuple[float | None, float | None]:
+        inverter_ids, pv_meter_ids = self._fetch_juggle_device_ids(plant_uid)
+        if not inverter_ids or not pv_meter_ids:
+            return None, None
+
+        inverter_frames = [
+            self._normalise_juggle_readings(device_id, self._fetch_juggle_device_readings(device_id, target_date))
+            for device_id in inverter_ids
+        ]
+        meter_frames = [
+            self._normalise_juggle_readings(device_id, self._fetch_juggle_device_readings(device_id, target_date))
+            for device_id in pv_meter_ids
+        ]
+
+        inverter_df = pd.concat([frame for frame in inverter_frames if not frame.empty], ignore_index=True) if any(
+            not frame.empty for frame in inverter_frames
+        ) else pd.DataFrame()
+        meter_df = pd.concat([frame for frame in meter_frames if not frame.empty], ignore_index=True) if any(
+            not frame.empty for frame in meter_frames
+        ) else pd.DataFrame()
+
+        inverter_kwh = self._counter_total_kwh(inverter_df, "exportEnergy")
+        if inverter_kwh <= 0:
+            inverter_kwh = self._counter_total_kwh(inverter_df, "importEnergy")
+        if inverter_kwh <= 0:
+            inverter_kwh = self._positive_power_total_kwh(inverter_df, "importActivePower")
+
+        meter_kwh = self._counter_total_kwh(meter_df, "importEnergy")
+        if meter_kwh <= 0:
+            meter_kwh = self._positive_power_total_kwh(meter_df, "importActivePower")
+        if meter_kwh <= 0:
+            meter_kwh = self._counter_total_kwh(meter_df, "exportEnergy")
+
+        return inverter_kwh, meter_kwh
+
+    def _fetch_solis_day_energy(self, station_id: str, target_date: date) -> float | None:
+        key_id = str(os.getenv("SOLIS_KEY_ID", "")).strip()
+        key_secret = str(os.getenv("SOLIS_KEY_SECRET", "")).strip()
+        if not key_id or not key_secret:
+            return None
+        body = {
+            "id": station_id,
+            "money": "GBP",
+            "time": target_date.isoformat(),
+            "timeZone": 0,
+        }
+        body_str = json.dumps(body)
+        checker = SolisDailyChecker()
+        headers = checker._make_auth_headers(body_str, "/v1/api/stationDay")
+        try:
+            response = requests.post(
+                f"{checker.base_url}/v1/api/stationDay",
+                headers=headers,
+                data=body_str,
+                timeout=30,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            data = payload.get("data", {}) if isinstance(payload, dict) else {}
+            return _coerce_float(data.get("energy") or data.get("eToday") or data.get("dayEnergy"))
+        except Exception:
+            return None
+
+    def _compute_inverter_meter_alert(self, inverter_kwh: float, meter_kwh: float) -> str:
+        has_inv = inverter_kwh > 0
+        has_meter = meter_kwh > 0
+        if has_meter and not has_inv:
+            return "Meter Only"
+        if has_inv and not has_meter:
+            return "Inverter Only"
+        if not has_inv and not has_meter:
+            return "OK"
+        diff_pct = abs((inverter_kwh - meter_kwh) / meter_kwh) * 100.0 if meter_kwh else 0.0
+        if diff_pct > INVERTER_METER_ALERT_CRITICAL_PCT:
+            return "Critical"
+        return "OK"
+
+    def _build_inverter_meter_comparison_finding(
+        self,
+        row: dict[str, Any],
+        identifiers: dict[str, str],
+        resolution: MatchResolution,
+        target_date: date,
+    ) -> dict[str, Any] | None:
+        plant_uid = identifiers.get("juggle")
+        if not plant_uid:
+            return None
+        try:
+            inverter_kwh, meter_kwh = self._fetch_juggle_inverter_meter_totals(plant_uid, target_date)
+        except Exception:
+            return None
+        if inverter_kwh is None or meter_kwh is None:
+            return None
+
+        platform = _canonical_platform(_normalise_key((resolution.mapping or {}).get("platform")))
+        solis_kwh = None
+        if platform == "solis":
+            solis_id = identifiers.get("solis")
+            if solis_id:
+                solis_kwh = self._fetch_solis_day_energy(solis_id, target_date)
+
+        alert_label = self._compute_inverter_meter_alert(inverter_kwh, meter_kwh)
+        if alert_label == "OK":
+            return None
+
+        diff_kwh = inverter_kwh - meter_kwh
+        diff_pct = (diff_kwh / meter_kwh * 100.0) if meter_kwh else 0.0
+        severity = "high" if alert_label == "Critical" else "medium"
+        metrics = {
+            "inverter_kwh": inverter_kwh,
+            "meter_kwh": meter_kwh,
+            "diff_kwh": diff_kwh,
+            "diff_pct": diff_pct,
+            "alert_label": alert_label,
+            "platform": platform or "",
+        }
+        if solis_kwh is not None:
+            metrics["solis_kwh"] = solis_kwh
+
+        return _build_finding(
+            finding_type="inverter_meter_comparison",
+            severity=severity,
+            confidence=0.9,
+            summary="Inverter total differs from PV meter total.",
+            recommended_action="Review Juggle inverter totals, PV meter totals, and platform day totals for the target day.",
+            source="juggle",
+            metrics=metrics,
+        )
+
+    def _build_findings_for_row(
+        self,
+        *,
+        row: dict[str, Any],
+        identifiers: dict[str, str],
+        resolution: MatchResolution,
+        target_date: date,
+    ) -> list[dict[str, Any]]:
+        checked_sources = [source for source in str(row.get("checked_sources", "")).split(",") if source]
+        statuses = {source: row.get(f"{source}_status", "") for source in self.supported_sources}
+        error_sources = sorted(source for source, status in statuses.items() if status == "error")
+        missing_identifier_sources = sorted(
+            source for source, status in statuses.items() if status == "missing_identifier"
+        )
+        unconfigured_sources = sorted(
+            source for source in checked_sources if statuses.get(source) == "unconfigured"
+        )
+
+        findings: list[dict[str, Any]] = []
+        if row.get("match_method") == "unresolved":
+            findings.append(
+                _build_finding(
+                    finding_type="mapping_unresolved",
+                    severity="medium",
+                    confidence=0.95,
+                    summary="No canonical mapping is available, so the audit could not resolve an external data source.",
+                    recommended_action="Confirm the external monitoring site name and update Data Source Match in the asset register.",
+                    context={
+                        "checked_sources": row.get("checked_sources", ""),
+                        "match_method": row.get("match_method", ""),
+                    },
+                )
+            )
+        elif error_sources:
+            joined = ", ".join(error_sources)
+            findings.append(
+                _build_finding(
+                    finding_type="source_error",
+                    severity="high",
+                    confidence=0.85,
+                    summary=f"The audit hit API errors while checking {joined}.",
+                    recommended_action=f"Check the {joined} API response and credentials, then rerun the audit.",
+                    source=joined if len(error_sources) == 1 else None,
+                    context={
+                        "checked_sources": row.get("checked_sources", ""),
+                        "match_method": row.get("match_method", ""),
+                    },
+                )
+            )
+        elif unconfigured_sources and not row.get("has_any_data"):
+            joined = ", ".join(unconfigured_sources)
+            findings.append(
+                _build_finding(
+                    finding_type="source_unconfigured",
+                    severity="medium",
+                    confidence=0.8,
+                    summary=f"The mapped source {joined} could not be checked because credentials are missing.",
+                    recommended_action=f"Configure credentials for {joined} in the local environment or GitHub Actions and rerun the audit.",
+                    source=joined if len(unconfigured_sources) == 1 else None,
+                    context={
+                        "checked_sources": row.get("checked_sources", ""),
+                        "match_method": row.get("match_method", ""),
+                    },
+                )
+            )
+        elif missing_identifier_sources and not row.get("has_any_data"):
+            joined = ", ".join(missing_identifier_sources)
+            findings.append(
+                _build_finding(
+                    finding_type="missing_identifier",
+                    severity="medium",
+                    confidence=0.8,
+                    summary=f"The audit knows which source to query but does not have identifiers for {joined}.",
+                    recommended_action=f"Add the missing external identifier for {joined} or confirm the Data Source Match mapping.",
+                    source=joined if len(missing_identifier_sources) == 1 else None,
+                    context={
+                        "checked_sources": row.get("checked_sources", ""),
+                        "match_method": row.get("match_method", ""),
+                    },
+                )
+            )
+        elif not row.get("has_any_data"):
+            findings.append(
+                _build_finding(
+                    finding_type="no_data",
+                    severity="high",
+                    confidence=0.7,
+                    summary="The audit found no source data for the target day despite a resolved mapping.",
+                    recommended_action="Review telemetry availability, site communications, and inverter portal data for the target day.",
+                    context={
+                        "checked_sources": row.get("checked_sources", ""),
+                        "match_method": row.get("match_method", ""),
+                    },
+                )
+            )
+
+        stark_finding = self._build_stark_fusion_variance_finding(row)
+        if stark_finding is not None:
+            findings.append(stark_finding)
+
+        inverter_meter_finding = self._build_inverter_meter_comparison_finding(
+            row,
+            identifiers,
+            resolution,
+            target_date,
+        )
+        if inverter_meter_finding is not None:
+            findings.append(inverter_meter_finding)
+
+        findings.sort(key=lambda item: _severity_sort_key(item.get("severity")), reverse=True)
+        return findings
+
+    def _project_triage_record(
+        self,
+        *,
+        row: dict[str, Any],
+        finding: dict[str, Any],
+        context: dict[str, str],
+    ) -> dict[str, Any]:
+        finding_type = str(finding.get("finding_type", "")).strip()
+        finding_summary = str(finding.get("summary", "")).strip()
+        email_subject = _build_email_subject(
+            asset_name=str(row.get("asset_name", "")).strip(),
+            issue_type=finding_type,
+            target_date=str(row.get("target_date", "")).strip(),
+        )
+        assessment = TriageAssessment(
+            issue_type=finding_type,
+            severity=str(finding.get("severity", "medium")).strip() or "medium",
+            confidence=float(finding.get("confidence", 0.0) or 0.0),
+            recommended_action=str(finding.get("recommended_action", "")).strip(),
+            issue_summary=finding_summary,
+        )
+        email_draft = _build_email_draft(
+            asset_name=str(row.get("asset_name", "")).strip(),
+            target_date=str(row.get("target_date", "")).strip(),
+            assessment=assessment,
+            context=context,
+            row=row,
+        )
+        return {
+            "row_key": f"{row.get('target_date', '')}|{row.get('asset_name', '')}|{finding_type}",
+            "asset_name": row.get("asset_name", ""),
+            "project_name": context["project_name"],
+            "customer_name": context["customer_name"],
+            "spv": context["spv"],
+            "priority": context["priority"],
+            "target_date": row.get("target_date", ""),
+            "finding_type": finding_type,
+            "finding_summary": finding_summary,
+            "issue_type": finding_type,
+            "severity": assessment.severity,
+            "confidence": assessment.confidence,
+            "source_coverage": row.get("checked_sources", ""),
+            "evidence_summary": _build_evidence_summary(row, context),
+            "recommended_action": assessment.recommended_action,
+            "email_subject": email_subject,
+            "email_draft": email_draft,
+            "am_contact_name": context["am_contact_name"],
+            "am_contact_email": context["am_contact_email"],
+            "asset_register_url": row.get("notion_url", ""),
+            "preferred_source": row.get("preferred_source", ""),
+            "match_method": row.get("match_method", ""),
+            "has_any_data": bool(row.get("has_any_data")),
+        }
+
     def backfill_confirmed_data_source_matches(
         self,
         updates: dict[str, str] | None = None,
@@ -2099,6 +2650,10 @@ class AssetRegisterAuditService:
                 "worst_inverter_availability_ratio": None,
                 "inverter_availability_summary": "",
                 "inverter_availability_breakdown": [],
+                "findings": [],
+                "finding_types": [],
+                "actionable_finding_count": 0,
+                "highest_finding_severity": "",
             }
             row.update(_extract_asset_context(asset))
 
@@ -2140,15 +2695,20 @@ class AssetRegisterAuditService:
             row["sources_with_data"] = ",".join(sources_with_data)
             row["has_any_data"] = bool(sources_with_data)
             row["preferred_source"] = sources_with_data[0] if sources_with_data else ""
-            if row["has_any_data"] and self.daylight_metrics_fetcher is not None:
-                identifier = identifiers.get(row["preferred_source"], "")
+            metrics_source = self._select_metrics_source(
+                source_results=source_results,
+                candidate_sources=candidate_sources,
+                identifiers=identifiers,
+            )
+            if metrics_source and self.daylight_metrics_fetcher is not None:
+                identifier = identifiers.get(metrics_source, "")
                 metrics = self.daylight_metrics_fetcher.get_day_metrics(
                     identifier,
                     target_date,
                     capacity_kwp=capacity_kwp,
                     asset_name=asset_name,
                     match_name=resolution.match_name,
-                    source=row["preferred_source"],
+                    source=metrics_source,
                 )
                 if inspect.isawaitable(metrics):
                     metrics = await metrics
@@ -2177,6 +2737,17 @@ class AssetRegisterAuditService:
                     "Estimated from daylight expected-vs-actual generation gap; "
                     "controller state is not confirmed in the daily asset audit."
                 )
+            findings = self._build_findings_for_row(
+                row=row,
+                identifiers=identifiers,
+                resolution=resolution,
+                target_date=target_date,
+            )
+            row["findings"] = findings
+            row["finding_types"] = [str(item.get("finding_type", "")).strip() for item in findings if item.get("finding_type")]
+            row["actionable_finding_count"] = sum(1 for item in findings if _severity_sort_key(item.get("severity")) >= _severity_sort_key("medium"))
+            highest_severity = max((item.get("severity", "") for item in findings), key=_severity_sort_key, default="")
+            row["highest_finding_severity"] = str(highest_severity or "")
             rows.append(row)
 
         return rows
@@ -2198,8 +2769,25 @@ class AssetRegisterAuditService:
         for row in dataset:
             if row.get("pac_phase") != "post_pac":
                 continue
-            assessment = _assess_triage_issue(row)
-            if not include_healthy and assessment.issue_type == "healthy_data_present":
+            findings = list(row.get("findings", []) or [])
+            if not findings:
+                if not include_healthy:
+                    continue
+                findings = [
+                    _build_finding(
+                        finding_type="healthy_data_present",
+                        severity="info",
+                        confidence=0.9,
+                        summary="At least one source reported data for the target day.",
+                        recommended_action="No immediate action required.",
+                    )
+                ]
+            actionable_findings = [
+                finding
+                for finding in findings
+                if include_healthy or str(finding.get("finding_type", "")).strip() != "healthy_data_present"
+            ]
+            if not actionable_findings:
                 continue
 
             context = {
@@ -2211,44 +2799,14 @@ class AssetRegisterAuditService:
                 "am_contact_name": str(row.get("am_contact_name", "")).strip(),
                 "am_contact_email": str(row.get("am_contact_email", "")).strip(),
             }
-            evidence_summary = _build_evidence_summary(row, context)
-            email_subject = _build_email_subject(
-                asset_name=str(row.get("asset_name", "")).strip(),
-                issue_type=assessment.issue_type,
-                target_date=str(row.get("target_date", "")).strip(),
-            )
-            email_draft = _build_email_draft(
-                asset_name=str(row.get("asset_name", "")).strip(),
-                target_date=str(row.get("target_date", "")).strip(),
-                assessment=assessment,
-                context=context,
-                row=row,
-            )
-            triage_records.append(
-                {
-                    "row_key": f"{row.get('target_date', '')}|{row.get('asset_name', '')}|{assessment.issue_type}",
-                    "asset_name": row.get("asset_name", ""),
-                    "project_name": context["project_name"],
-                    "customer_name": context["customer_name"],
-                    "spv": context["spv"],
-                    "priority": context["priority"],
-                    "target_date": row.get("target_date", ""),
-                    "issue_type": assessment.issue_type,
-                    "severity": assessment.severity,
-                    "confidence": assessment.confidence,
-                    "source_coverage": row.get("checked_sources", ""),
-                    "evidence_summary": evidence_summary,
-                    "recommended_action": assessment.recommended_action,
-                    "email_subject": email_subject,
-                    "email_draft": email_draft,
-                    "am_contact_name": context["am_contact_name"],
-                    "am_contact_email": context["am_contact_email"],
-                    "asset_register_url": row.get("notion_url", ""),
-                    "preferred_source": row.get("preferred_source", ""),
-                    "match_method": row.get("match_method", ""),
-                    "has_any_data": bool(row.get("has_any_data")),
-                }
-            )
+            for finding in actionable_findings:
+                triage_records.append(
+                    self._project_triage_record(
+                        row=row,
+                        finding=finding,
+                        context=context,
+                    )
+                )
 
         return triage_records
 
@@ -2375,12 +2933,19 @@ class AssetRegisterAuditService:
                 "SMA Message": _text_property(row.get("sma_message")),
                 "Daily JSON": _text_property(json.dumps(row, sort_keys=True)),
             }
-            page_id = self.notion_service.upsert_database_page(
-                database_id=target_database_id,
-                match_field="Row Key",
-                match_value=row_key,
-                properties=properties,
-            )
+            create_page = getattr(self.notion_service, "create_database_page", None)
+            if callable(create_page):
+                page_id = create_page(
+                    database_id=target_database_id,
+                    properties=properties,
+                )
+            else:
+                page_id = self.notion_service.upsert_database_page(
+                    database_id=target_database_id,
+                    match_field="Row Key",
+                    match_value=row_key,
+                    properties=properties,
+                )
             if page_id:
                 published += 1
             else:

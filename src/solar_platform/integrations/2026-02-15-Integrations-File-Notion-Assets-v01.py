@@ -203,6 +203,68 @@ class NotionAssetRegisterService:
             logger.warning("notion_database_create_failed", error=str(exc), title=title)
             return None
 
+    def ensure_database_properties(self, database_id: str, properties: dict[str, Any]) -> bool:
+        """Ensure a database contains the requested properties."""
+        token = str(getattr(self._settings, "notion_integration_token", "")).strip()
+        database_id = str(database_id).strip()
+        if not token or not database_id or not properties:
+            return False
+
+        existing = self._get_database_properties(token=token, database_id=database_id)
+        if existing is None:
+            return False
+
+        missing: dict[str, Any] = {
+            name: definition
+            for name, definition in properties.items()
+            if str(name).strip() and str(name).strip() not in existing
+        }
+        if not missing:
+            return True
+
+        legacy_headers = self._headers(version=_NOTION_API_VERSION, token=token)
+        try:
+            response = httpx.patch(
+                _NOTION_DATABASE_URL.format(database_id=database_id),
+                headers=legacy_headers,
+                json={"properties": missing},
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            return True
+        except Exception as exc:
+            logger.warning("notion_database_property_update_legacy_failed", error=str(exc), database_id=database_id)
+
+        data_source_id = self._get_primary_data_source_id(token=token, database_id=database_id)
+        if not data_source_id:
+            return False
+
+        modern_headers = self._headers(version=_NOTION_MULTI_SOURCE_API_VERSION, token=token)
+        modern_payload = {
+            "properties": {
+                name: {
+                    "name": name,
+                    "type": definition_type,
+                    definition_type: definition.get(definition_type, {}),
+                }
+                for name, definition in missing.items()
+                for definition_type in [str(definition.get("type") or next(iter(definition.keys()), "")).strip()]
+                if definition_type
+            }
+        }
+        try:
+            response = httpx.patch(
+                _NOTION_UPDATE_DATA_SOURCE_URL.format(data_source_id=data_source_id),
+                headers=modern_headers,
+                json=modern_payload,
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            return True
+        except Exception as exc:
+            logger.warning("notion_database_property_update_failed", error=str(exc), database_id=database_id)
+            return False
+
     def upsert_database_page(
         self,
         database_id: str,
@@ -248,6 +310,36 @@ class NotionAssetRegisterService:
                 database_id=database_id,
                 match_field=match_field,
                 match_value=match_value,
+            )
+            return None
+
+    def create_database_page(
+        self,
+        database_id: str,
+        properties: dict[str, Any],
+    ) -> str | None:
+        """Create a new page in the given database without matching existing rows."""
+        token = str(getattr(self._settings, "notion_integration_token", "")).strip()
+        database_id = str(database_id).strip()
+        if not token or not database_id:
+            return None
+
+        headers = self._headers(version=_NOTION_API_VERSION, token=token)
+        try:
+            response = httpx.post(
+                _NOTION_CREATE_PAGE_URL,
+                headers=headers,
+                json={"parent": {"database_id": database_id}, "properties": properties},
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            body = response.json()
+            return str(body.get("id", "")).strip() or None
+        except Exception as exc:
+            logger.warning(
+                "notion_database_page_create_failed",
+                error=str(exc),
+                database_id=database_id,
             )
             return None
 
@@ -299,6 +391,50 @@ class NotionAssetRegisterService:
                     return row
 
         return None
+
+    def query_database_rows(
+        self,
+        database_id: str,
+        filter_payload: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Query an arbitrary Notion database and return flattened rows."""
+        token = str(getattr(self._settings, "notion_integration_token", "")).strip()
+        database_id = str(database_id).strip()
+        if not token or not database_id:
+            return []
+
+        headers = self._headers(version=_NOTION_API_VERSION, token=token)
+        url = _NOTION_API_URL.format(database_id=database_id)
+        rows: list[dict[str, Any]] = []
+        cursor: str | None = None
+
+        while True:
+            payload: dict[str, Any] = {"page_size": 100}
+            if filter_payload:
+                payload.update(filter_payload)
+            if cursor:
+                payload["start_cursor"] = cursor
+
+            try:
+                response = httpx.post(url, headers=headers, json=payload, timeout=30.0)
+                response.raise_for_status()
+                body = response.json()
+            except Exception as exc:
+                logger.warning("notion_database_query_failed", error=str(exc), database_id=database_id)
+                return []
+
+            for page in body.get("results", []):
+                flattened = _flatten_page(page)
+                if flattened:
+                    rows.append(flattened)
+
+            if not body.get("has_more"):
+                break
+            cursor = body.get("next_cursor")
+            if not cursor:
+                break
+
+        return rows
 
     # ── Internal helpers ──────────────────────────────────────────────
 
@@ -461,6 +597,34 @@ class NotionAssetRegisterService:
             if value:
                 return value
         return ""
+
+    def _get_database_properties(self, token: str, database_id: str) -> dict[str, Any] | None:
+        headers = self._headers(version=_NOTION_API_VERSION, token=token)
+        try:
+            response = httpx.get(
+                _NOTION_DATABASE_URL.format(database_id=database_id),
+                headers=headers,
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            body = response.json()
+            properties = body.get("properties", {}) if isinstance(body, dict) else {}
+            return properties if isinstance(properties, dict) else {}
+        except Exception:
+            headers = self._headers(version=_NOTION_MULTI_SOURCE_API_VERSION, token=token)
+            try:
+                response = httpx.get(
+                    _NOTION_DATABASE_URL.format(database_id=database_id),
+                    headers=headers,
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+                body = response.json()
+                properties = body.get("properties", {}) if isinstance(body, dict) else {}
+                return properties if isinstance(properties, dict) else {}
+            except Exception as exc:
+                logger.warning("notion_database_property_lookup_failed", error=str(exc), database_id=database_id)
+                return None
 
     def _find_page_id_by_field(
         self,
