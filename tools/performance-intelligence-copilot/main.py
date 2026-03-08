@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 from solar_platform.services.performance_copilot_asset_audit import (
     AssetRegisterAuditService,
+    run_asset_register_daily_publish,
     run_asset_register_yesterday_audit,
     run_asset_register_triage_publish,
 )
@@ -21,6 +22,7 @@ NEWFOLD_FARM_UID = "ERS:00001" # Correct UID from EMIG data
 INSTALLED_DC_KWP = 459.0 # Approximate from previous data
 PR_BASELINE = 0.85
 INTERVAL_HOURS = 0.25 # 15 mins
+DEFAULT_PPA_RATE_GBP_MWH = 100.0
 
 async def fetch_emig_data() -> pd.DataFrame:
     """Fetch the last 24 hours of data from EMIG for Newfold Farm."""
@@ -193,9 +195,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=("asset-register-yesterday", "asset-register-backfill", "asset-register-publish-triage", "single-site"),
+        choices=(
+            "asset-register-yesterday",
+            "asset-register-backfill",
+            "asset-register-publish-triage",
+            "asset-register-publish-daily",
+            "single-site",
+        ),
         default="asset-register-yesterday",
-        help="Run the asset-register audit, the Data Source Match backfill, publish triage output, or the legacy single-site copilot.",
+        help="Run the asset-register audit, the Data Source Match backfill, publish triage or daily output, or the legacy single-site copilot.",
     )
     parser.add_argument(
         "--output-dir",
@@ -219,6 +227,16 @@ def parse_args() -> argparse.Namespace:
         "--include-healthy",
         action="store_true",
         help="Include healthy records when publishing triage output.",
+    )
+    parser.add_argument(
+        "--daily-json-database-id",
+        default=os.getenv("NOTION_DAILY_JSON_DATABASE_ID", ""),
+        help="Optional Notion database ID for daily output publishing.",
+    )
+    parser.add_argument(
+        "--daily-json-parent-page-id",
+        default=os.getenv("NOTION_DAILY_JSON_PARENT_PAGE_ID", ""),
+        help="Optional Notion page ID used to create the Daily JSON database if it does not exist.",
     )
     return parser.parse_args()
 
@@ -265,20 +283,27 @@ async def run_single_site_copilot():
 
         # 2. Analyze Telemetry
         print("\nAnalyzing Telemetry for Curtailment/Losses...")
+        ppa_rate_gbp_mwh = float(os.getenv("PPA_RATE_GBP_MWH", str(DEFAULT_PPA_RATE_GBP_MWH)))
         analyzed_df, events = analyze_telemetry_dataframe(
             df=df,
             installed_dc_kwp=INSTALLED_DC_KWP,
             pr_baseline=PR_BASELINE,
-            interval_hours=INTERVAL_HOURS
+            interval_hours=INTERVAL_HOURS,
+            ppa_rate_gbp_mwh=ppa_rate_gbp_mwh,
         )
         
         print(f"Total Curtailment Events Detected: {len(events)}")
         
         if events:
             # Aggregate all energy lost
-            total_lost_energy = sum(e["lost_energy_kwh"] for e in events)
-            # Dummy revenue calc: £0.10/kWh
-            total_revenue_loss = total_lost_energy * 0.10 
+            total_lost_energy = sum(
+                float(e.get("estimated_generation_loss_kwh", e.get("lost_energy_kwh", 0.0)) or 0.0)
+                for e in events
+            )
+            total_revenue_loss = sum(
+                float(e.get("estimated_revenue_loss_gbp", 0.0) or 0.0)
+                for e in events
+            )
             event_type = "aggregated_export_limit_curtailment"
         else:
             total_lost_energy = 0.0
@@ -325,13 +350,17 @@ async def run_asset_register_audit(args: argparse.Namespace):
     dataset = result["dataset"]
     if not dataset:
         print(
-            "No eligible asset rows were returned. "
-            "This usually means Notion access is not configured or no assets have PAC Date in the past."
+            "No asset rows were returned. "
+            "This usually means Notion access is not configured or the asset register query failed."
         )
         return
 
     assets_with_data = sum(1 for row in dataset if row.get("has_any_data"))
+    post_pac_assets = sum(1 for row in dataset if row.get("pac_phase") == "post_pac")
+    pre_pac_assets = sum(1 for row in dataset if row.get("pac_phase") == "pre_pac")
+    unknown_pac_assets = sum(1 for row in dataset if row.get("pac_phase") == "unknown")
     print(f"Assets with data in at least one source: {assets_with_data}")
+    print(f"PAC split: post_pac={post_pac_assets} pre_pac={pre_pac_assets} unknown={unknown_pac_assets}")
 
 
 def run_asset_register_backfill(args: argparse.Namespace):
@@ -358,6 +387,26 @@ async def run_asset_register_triage(args: argparse.Namespace):
     print(f"Failed rows: {publish_result['failed']}")
 
 
+async def run_asset_register_daily_publish_cmd(args: argparse.Namespace):
+    result = await run_asset_register_daily_publish(
+        output_dir=Path(args.output_dir),
+        reference_date=_parse_reference_date(args.reference_date),
+        force_refresh=args.force_refresh,
+        asset_filter=args.asset_filter,
+        database_id=args.daily_json_database_id or None,
+        parent_page_id=args.daily_json_parent_page_id or None,
+    )
+
+    print(f"Asset-register daily publish complete for {result['target_date']}")
+    print(f"Daily rows written: {result['rows']}")
+    print(f"Daily JSON: {result['daily_json']}")
+    publish_result = result["publish_result"]
+    print(f"Notion database: {publish_result['database_id']}")
+    print(f"Rows eligible for Notion publish: {publish_result.get('eligible_rows', result['rows'])}")
+    print(f"Published rows: {publish_result['published']}")
+    print(f"Failed rows: {publish_result['failed']}")
+
+
 async def main():
     args = parse_args()
     if args.mode == "single-site":
@@ -368,6 +417,9 @@ async def main():
         return
     if args.mode == "asset-register-publish-triage":
         await run_asset_register_triage(args)
+        return
+    if args.mode == "asset-register-publish-daily":
+        await run_asset_register_daily_publish_cmd(args)
         return
     await run_asset_register_audit(args)
 
