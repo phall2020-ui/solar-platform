@@ -1538,6 +1538,7 @@ class RepositoryDaylightMetricsFetcher:
         batch_fetcher=None,
         irradiance_threshold_wm2: float = 75.0,
         target_pr_ratio: float = TARGET_PR_ASSUMPTION,
+        prefer_archive_irradiance: bool = False,
         runtime_today: date | None = None,
     ) -> None:
         self.plant_repository = plant_repository or PlantRepository()
@@ -1551,6 +1552,7 @@ class RepositoryDaylightMetricsFetcher:
         self.batch_fetcher = batch_fetcher or self._fetch_source_batch
         self.irradiance_threshold_wm2 = irradiance_threshold_wm2
         self.target_pr_ratio = target_pr_ratio
+        self.prefer_archive_irradiance = prefer_archive_irradiance
         self.runtime_today = runtime_today or datetime.now(UTC).date()
 
     async def get_day_metrics(
@@ -1584,47 +1586,48 @@ class RepositoryDaylightMetricsFetcher:
             "inverter_availability_breakdown": [],
         }
 
-        plant_uid = self._resolve_plant_uid(
-            source=source,
-            identifier=identifier,
-            match_name=match_name,
-            asset_name=asset_name,
-        )
+        plant_uid = ""
         irr_df = pd.DataFrame(columns=["hh_ts", "poa_interval_kwh_m2", "poa_wm2"])
         irradiance_errors: list[str] = []
-        if plant_uid:
+        location = self._resolve_site_location(match_name=match_name, asset_name=asset_name)
+        if self.prefer_archive_irradiance and location is not None:
             try:
-                irr_df = self._load_repo_poa_series(plant_uid, target_date)
+                irr_df = self.archive_irradiance_fetcher.fetch_half_hourly(
+                    target_date=target_date,
+                    latitude=float(location.latitude),
+                    longitude=float(location.longitude),
+                    timezone=str(location.timezone),
+                    tilt_deg=float(location.tilt_deg),
+                    azimuth_deg=float(location.azimuth_deg),
+                )
             except Exception as exc:
-                irradiance_errors.append(f"Repo POA lookup failed: {exc}")
+                irradiance_errors.append(f"Archive irradiance fetch failed: {exc}")
                 irr_df = pd.DataFrame(columns=["hh_ts", "poa_interval_kwh_m2", "poa_wm2"])
             if not irr_df.empty:
-                metrics["irradiance_source"] = "repo_solargis_weighted_poa"
-                metrics["irradiance_device_id"] = "POA:SOLARGIS:WEIGHTED"
+                metrics["irradiance_source"] = "openmeteo_archive_gti"
+                metrics["irradiance_device_id"] = location.name
 
         if irr_df.empty:
-            location = self._resolve_site_location(match_name=match_name, asset_name=asset_name)
-            if location is not None:
+            plant_uid = self._resolve_plant_uid(
+                source=source,
+                identifier=identifier,
+                match_name=match_name,
+                asset_name=asset_name,
+            )
+            if plant_uid:
                 try:
-                    irr_df = self.archive_irradiance_fetcher.fetch_half_hourly(
-                        target_date=target_date,
-                        latitude=float(location.latitude),
-                        longitude=float(location.longitude),
-                        timezone=str(location.timezone),
-                        tilt_deg=float(location.tilt_deg),
-                        azimuth_deg=float(location.azimuth_deg),
-                    )
+                    irr_df = self._load_repo_poa_series(plant_uid, target_date)
                 except Exception as exc:
-                    irradiance_errors.append(f"Archive irradiance fetch failed: {exc}")
+                    irradiance_errors.append(f"Repo POA lookup failed: {exc}")
                     irr_df = pd.DataFrame(columns=["hh_ts", "poa_interval_kwh_m2", "poa_wm2"])
                 if not irr_df.empty:
-                    metrics["irradiance_source"] = "openmeteo_archive_gti"
-                    metrics["irradiance_device_id"] = location.name
+                    metrics["irradiance_source"] = "repo_solargis_weighted_poa"
+                    metrics["irradiance_device_id"] = "POA:SOLARGIS:WEIGHTED"
 
         if irr_df.empty:
             base_message = (
                 "No irradiance data found for the target day."
-                if plant_uid
+                if location is not None or plant_uid
                 else "No plant or site-location match found for irradiance lookup."
             )
             if irradiance_errors:
@@ -2198,7 +2201,7 @@ class AssetRegisterAuditService:
         self.daylight_metrics_fetcher = (
             daylight_metrics_fetcher
             or juggle_daylight_metrics_fetcher
-            or RepositoryDaylightMetricsFetcher()
+            or RepositoryDaylightMetricsFetcher(prefer_archive_irradiance=True)
         )
         self.curtailment_fetcher = curtailment_fetcher or ExportLimitCurtailmentFetcher()
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -10,6 +10,7 @@ import pytest
 
 from solar_platform.weather.open_meteo import (
     HourlyWeatherRecord,
+    OpenMeteoArchiveClient,
     OpenMeteoClient,
     WeatherFetchError,
 )
@@ -75,6 +76,14 @@ def _mock_async_get(response: MagicMock) -> AsyncMock:
     """Wrap a response mock as an async .get() method."""
     mock_get = AsyncMock(return_value=response)
     return mock_get
+
+
+def _mock_sync_get(response: MagicMock):
+    """Wrap a response mock as a sync .get() method."""
+    def _get(*args, **kwargs):  # noqa: ANN002, ANN003
+        return response
+
+    return _get
 
 
 # ---------------------------------------------------------------------------
@@ -232,3 +241,62 @@ async def test_batch_forecast_returns_per_site_dict():
     assert set(result.keys()) == {"PlantAlpha", "PlantBeta"}
     assert len(result["PlantAlpha"]) == NUM_HOURS
     assert len(result["PlantBeta"]) == NUM_HOURS
+
+
+def test_archive_fetch_includes_gti_and_returns_tz_aware_records():
+    """Archive fetch should request GTI and parse timezone-aware hourly records."""
+    client = OpenMeteoArchiveClient()
+    api_data = _make_api_response(include_gti=True)
+    mock_resp = _mock_response(api_data)
+    captured_params: dict = {}
+
+    def capturing_get(_self, url: str, **kwargs):
+        captured_params.update(kwargs.get("params", {}))
+        return mock_resp
+
+    with patch("httpx.Client.get", new=capturing_get):
+        records = client.fetch_archive(
+            plant_name="SiteArchive",
+            target_date=date(2026, 3, 7),
+            lat=53.88,
+            lon=-2.54,
+            timezone="Europe/London",
+            tilt_deg=30.0,
+            azimuth_deg=180.0,
+        )
+
+    assert len(records) == NUM_HOURS
+    assert all(isinstance(r, HourlyWeatherRecord) for r in records)
+    assert all(r.timestamp.tzinfo is not None for r in records)
+    assert captured_params["start_date"] == "2026-03-07"
+    assert captured_params["end_date"] == "2026-03-07"
+    assert "global_tilted_irradiance" in captured_params["hourly"]
+    assert records[1].gti_wm2 == 12.0
+
+
+def test_archive_fetch_retries_after_timeout_and_succeeds():
+    """Archive fetch should retry transient timeout errors before failing."""
+    client = OpenMeteoArchiveClient(timeout=1.0)
+    api_data = _make_api_response(include_gti=True)
+    mock_resp = _mock_response(api_data)
+    calls = {"count": 0}
+
+    def flaky_get(_self, url: str, **kwargs):  # noqa: ANN001
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise httpx.TimeoutException("handshake timed out")
+        return mock_resp
+
+    with patch("httpx.Client.get", new=flaky_get):
+        records = client.fetch_archive(
+            plant_name="Retry Site",
+            target_date=date(2026, 3, 7),
+            lat=53.88,
+            lon=-2.54,
+            timezone="Europe/London",
+            tilt_deg=30.0,
+            azimuth_deg=180.0,
+        )
+
+    assert calls["count"] == 2
+    assert len(records) == NUM_HOURS

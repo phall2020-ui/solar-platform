@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime
+import time
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -190,8 +191,15 @@ class OpenMeteoClient:
 
 
 class OpenMeteoArchiveClient:
-    def __init__(self, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        timeout: float = 30.0,
+        max_attempts: int = 2,
+        retry_backoff_seconds: float = 1.0,
+    ) -> None:
         self.timeout = timeout
+        self.max_attempts = max(1, int(max_attempts))
+        self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
 
     def fetch_archive(
         self,
@@ -222,20 +230,35 @@ class OpenMeteoArchiveClient:
             params["tilt"] = tilt_deg
             params["azimuth"] = azimuth_deg
 
+        last_timeout: httpx.TimeoutException | None = None
         with httpx.Client(timeout=self.timeout) as client:
-            try:
-                response = client.get(ARCHIVE_URL, params=params)
-                response.raise_for_status()
-            except httpx.TimeoutException as exc:
-                raise WeatherFetchError(
-                    plant_name, None, f"Request timed out: {exc}"
-                ) from exc
-            except httpx.HTTPStatusError as exc:
-                raise WeatherFetchError(
-                    plant_name,
-                    exc.response.status_code,
-                    f"HTTP error: {exc}",
-                ) from exc
+            for attempt in range(1, self.max_attempts + 1):
+                try:
+                    response = client.get(ARCHIVE_URL, params=params)
+                    response.raise_for_status()
+                    break
+                except httpx.TimeoutException as exc:
+                    last_timeout = exc
+                    if attempt >= self.max_attempts:
+                        raise WeatherFetchError(
+                            plant_name, None, f"Request timed out: {exc}"
+                        ) from exc
+                    if self.retry_backoff_seconds > 0:
+                        time.sleep(self.retry_backoff_seconds)
+                except httpx.HTTPStatusError as exc:
+                    raise WeatherFetchError(
+                        plant_name,
+                        exc.response.status_code,
+                        f"HTTP error: {exc}",
+                    ) from exc
+            else:
+                if last_timeout is not None:
+                    raise WeatherFetchError(
+                        plant_name,
+                        None,
+                        f"Request timed out: {last_timeout}",
+                    ) from last_timeout
+                raise WeatherFetchError(plant_name, None, "Archive fetch failed")
 
         data = response.json()
         return OpenMeteoClient()._parse_records(
