@@ -1046,6 +1046,36 @@ def test_export_limit_curtailment_fetcher_falls_back_to_csv_when_parquet_is_unre
     assert result["curtailment_generation_loss_kwh"] == pytest.approx(20.0)
 
 
+def test_export_limit_curtailment_fetcher_prefers_live_api_signal_when_available(monkeypatch, tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import ExportLimitCurtailmentFetcher
+
+    fetcher = ExportLimitCurtailmentFetcher(
+        curtailment_engine=SimpleNamespace(run=lambda plant_uid, start, end: SimpleNamespace(summary={})),
+        export_limit_history_dir=tmp_path / "missing",
+    )
+    monkeypatch.setattr(
+        fetcher,
+        "_lookup_export_limit_api_signal",
+        lambda plant_uid, target_date: {"curtailed_records": 3, "min_limit_pct": 60.0},
+    )
+
+    result = fetcher.get_day_curtailment(
+        "AMP:00029",
+        date(2026, 3, 8),
+        ppa_rate_gbp_mwh=100.0,
+        expected_daylight_kwh=90.0,
+        actual_daylight_kwh=50.0,
+    )
+
+    assert result == {
+        "curtailment_event_type": "export_limit_curtailment",
+        "curtailment_generation_loss_kwh": 40.0,
+        "curtailment_revenue_loss_gbp": pytest.approx(4.0),
+        "curtailment_confidence": 0.95,
+        "curtailment_message": "Detected from live export-limit telemetry with 3 curtailed intervals. Min observed limit was 60.00%.",
+    }
+
+
 @pytest.mark.asyncio
 async def test_repository_daylight_metrics_fetcher_uses_repo_poa_and_any_kwh_availability() -> None:
     from solar_platform.ingestion.base import Reading, ReadingBatch, ReadingQuality

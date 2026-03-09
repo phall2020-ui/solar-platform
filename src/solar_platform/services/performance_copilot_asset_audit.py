@@ -360,6 +360,8 @@ class TriageAssessment:
 
 
 class ExportLimitCurtailmentFetcher:
+    LIMIT_THRESHOLD_PCT = 99.0
+
     def __init__(
         self,
         curtailment_engine: Any | None = None,
@@ -376,6 +378,118 @@ class ExportLimitCurtailmentFetcher:
     @staticmethod
     def _default_export_limit_history_dir() -> Path:
         return Path(__file__).resolve().parents[3] / "platform" / "data" / "export_limits"
+
+    @staticmethod
+    def _juggle_api_key() -> str:
+        candidates = (
+            os.getenv("JUGGLE_API_KEY", ""),
+            os.getenv("EMIG_API_KEY", ""),
+        )
+        for candidate in candidates:
+            value = str(candidate or "").strip()
+            if value:
+                return value
+        return ""
+
+    @staticmethod
+    def _juggle_base_url() -> str:
+        return str(os.getenv("EMIG_API_URL") or os.getenv("JUGGLE_API_URL") or "https://www.emig.co.uk/p/api").rstrip("/")
+
+    def _request_juggle_json(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
+        api_key = self._juggle_api_key()
+        if not api_key:
+            return None
+        query_params = dict(params or {})
+        query_params.setdefault("apikey", api_key)
+        response = requests.get(
+            f"{self._juggle_base_url()}{path}",
+            headers={"Authorization": f"token {api_key}"},
+            params=query_params,
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    @staticmethod
+    def _extract_export_limit_pct(reading: dict[str, Any]) -> float | None:
+        candidates = (
+            reading.get("exportLimit"),
+            reading.get("exportLimitPct"),
+            reading.get("exportLimitPercentage"),
+            reading.get("export_limit_pct"),
+        )
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                value = _coerce_float(candidate.get("value"))
+            else:
+                value = _coerce_float(candidate)
+            if value is not None:
+                return value
+        return None
+
+    def _fetch_limitation_device_ids(self, plant_uid: str) -> list[str]:
+        details = self._request_juggle_json(f"/plant/{plant_uid}")
+        if not isinstance(details, dict):
+            return []
+        meters = details.get("meters", [])
+        if not isinstance(meters, list):
+            return []
+        return [
+            str(meter.get("emigId", "")).strip()
+            for meter in meters
+            if isinstance(meter, dict) and meter.get("type") == "LIMITATION" and str(meter.get("emigId", "")).strip()
+        ]
+
+    def _fetch_limitation_device_readings(self, emig_id: str, target_date: date) -> list[dict[str, Any]]:
+        payload = self._request_juggle_json(
+            f"/meter/{emig_id}/readings",
+            params={
+                "startDate": target_date.strftime("%Y%m%d"),
+                "endDate": target_date.strftime("%Y%m%d"),
+                "minIntervalS": 1800,
+            },
+        )
+        if isinstance(payload, dict):
+            readings = payload.get("readings", [])
+            return readings if isinstance(readings, list) else []
+        return payload if isinstance(payload, list) else []
+
+    def _lookup_export_limit_api_signal(self, plant_uid: str, target_date: date) -> dict[str, Any] | None:
+        try:
+            limitation_ids = self._fetch_limitation_device_ids(plant_uid)
+        except Exception:
+            return None
+        if not limitation_ids:
+            return None
+
+        readings: list[dict[str, Any]] = []
+        for limitation_id in limitation_ids:
+            try:
+                readings.extend(self._fetch_limitation_device_readings(limitation_id, target_date))
+            except Exception:
+                continue
+
+        if not readings:
+            return None
+
+        limit_values = [
+            self._extract_export_limit_pct(reading)
+            for reading in readings
+            if isinstance(reading, dict)
+        ]
+        valid_values = [value for value in limit_values if value is not None]
+        if not valid_values:
+            return None
+
+        curtailed_values = [value for value in valid_values if value < self.LIMIT_THRESHOLD_PCT]
+        if not curtailed_values:
+            return None
+
+        return {
+            "records": len(valid_values),
+            "curtailed_records": len(curtailed_values),
+            "min_limit_pct": min(curtailed_values),
+        }
 
     @staticmethod
     def _estimate_generation_loss_kwh(expected_daylight_kwh: Any, actual_daylight_kwh: Any) -> float | None:
@@ -486,6 +600,24 @@ class ExportLimitCurtailmentFetcher:
             kwargs.get("expected_daylight_kwh"),
             kwargs.get("actual_daylight_kwh"),
         )
+        api_signal = self._lookup_export_limit_api_signal(plant_uid, target_date)
+        if api_signal is not None:
+            min_limit_pct = _coerce_float(api_signal.get("min_limit_pct"))
+            min_limit_fragment = (
+                f" Min observed limit was {min_limit_pct:.2f}%."
+                if min_limit_pct is not None
+                else ""
+            )
+            return self._build_curtailment_result(
+                generation_loss_kwh=daylight_gap_kwh,
+                ppa_rate_gbp_mwh=ppa_rate,
+                confidence=0.95,
+                message=(
+                    f"Detected from live export-limit telemetry with {api_signal['curtailed_records']} curtailed intervals."
+                    f"{min_limit_fragment}"
+                ),
+            )
+
         history_signal = self._lookup_export_limit_history_signal(plant_uid, target_date)
         if history_signal is not None:
             min_limit_pct = _coerce_float(history_signal.get("min_limit_pct"))
