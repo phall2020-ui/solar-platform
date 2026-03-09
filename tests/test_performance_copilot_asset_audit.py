@@ -1011,6 +1011,41 @@ def test_export_limit_curtailment_fetcher_uses_historical_signal_to_gate_dayligh
     }
 
 
+def test_export_limit_curtailment_fetcher_falls_back_to_csv_when_parquet_is_unreadable(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import ExportLimitCurtailmentFetcher
+
+    export_limit_dir = tmp_path / "export_limits"
+    export_limit_dir.mkdir()
+    (export_limit_dir / "export_limits_20250101_20260105.parquet").write_text("not a parquet file", encoding="utf-8")
+    (export_limit_dir / "export_limits_20250101_20260105.csv").write_text(
+        "\n".join(
+            [
+                "plant_uid,plant_name,timestamp,export_limit_pct,is_curtailed",
+                "ERS:00001,Newfold Farm,2026-03-07T10:00:00Z,55.0,True",
+                "ERS:00001,Newfold Farm,2026-03-07T10:30:00Z,55.0,True",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    fetcher = ExportLimitCurtailmentFetcher(
+        curtailment_engine=SimpleNamespace(run=lambda plant_uid, start, end: SimpleNamespace(summary={})),
+        export_limit_history_dir=export_limit_dir,
+    )
+
+    result = fetcher.get_day_curtailment(
+        "ERS:00001",
+        date(2026, 3, 7),
+        ppa_rate_gbp_mwh=85.0,
+        expected_daylight_kwh=120.0,
+        actual_daylight_kwh=100.0,
+    )
+
+    assert result is not None
+    assert result["curtailment_event_type"] == "export_limit_curtailment"
+    assert result["curtailment_generation_loss_kwh"] == pytest.approx(20.0)
+
+
 @pytest.mark.asyncio
 async def test_repository_daylight_metrics_fetcher_uses_repo_poa_and_any_kwh_availability() -> None:
     from solar_platform.ingestion.base import Reading, ReadingBatch, ReadingQuality

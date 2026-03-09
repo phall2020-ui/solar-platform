@@ -414,18 +414,24 @@ class ExportLimitCurtailmentFetcher:
             return self._export_limit_history_cache
 
         parquet_paths = sorted(history_dir.glob("*.parquet"))
-        candidate_paths = parquet_paths or sorted(history_dir.glob("*.csv"))
+        csv_paths = sorted(history_dir.glob("*.csv"))
         frames: list[pd.DataFrame] = []
-        for path in candidate_paths:
-            try:
-                if path.suffix == ".parquet":
-                    frame = pd.read_parquet(path)
-                else:
-                    frame = pd.read_csv(path)
-            except Exception:
+        for candidate_paths in (parquet_paths, csv_paths):
+            if not candidate_paths:
                 continue
-            if not frame.empty:
-                frames.append(frame)
+            frames = []
+            for path in candidate_paths:
+                try:
+                    if path.suffix == ".parquet":
+                        frame = pd.read_parquet(path)
+                    else:
+                        frame = pd.read_csv(path)
+                except Exception:
+                    continue
+                if not frame.empty:
+                    frames.append(frame)
+            if frames:
+                break
 
         if not frames:
             self._export_limit_history_cache = pd.DataFrame()
