@@ -360,20 +360,144 @@ class TriageAssessment:
 
 
 class ExportLimitCurtailmentFetcher:
-    def __init__(self, curtailment_engine: Any | None = None) -> None:
+    def __init__(
+        self,
+        curtailment_engine: Any | None = None,
+        export_limit_history_dir: Path | None = None,
+    ) -> None:
         if curtailment_engine is None:
             from solar_platform.analysis.curtailment import CurtailmentEngine
 
             curtailment_engine = CurtailmentEngine()
         self.curtailment_engine = curtailment_engine
+        self.export_limit_history_dir = export_limit_history_dir or self._default_export_limit_history_dir()
+        self._export_limit_history_cache: pd.DataFrame | None = None
+
+    @staticmethod
+    def _default_export_limit_history_dir() -> Path:
+        return Path(__file__).resolve().parents[3] / "platform" / "data" / "export_limits"
+
+    @staticmethod
+    def _estimate_generation_loss_kwh(expected_daylight_kwh: Any, actual_daylight_kwh: Any) -> float | None:
+        expected = _coerce_float(expected_daylight_kwh)
+        actual = _coerce_float(actual_daylight_kwh)
+        if expected is None or actual is None or expected <= actual:
+            return None
+        return expected - actual
+
+    @staticmethod
+    def _build_curtailment_result(
+        *,
+        generation_loss_kwh: float | None,
+        ppa_rate_gbp_mwh: float | None,
+        confidence: float,
+        message: str,
+    ) -> dict[str, Any]:
+        revenue_loss_gbp = None
+        if generation_loss_kwh is not None and generation_loss_kwh > 0 and ppa_rate_gbp_mwh is not None:
+            revenue_loss_gbp = (generation_loss_kwh / 1000.0) * ppa_rate_gbp_mwh
+        return {
+            "curtailment_event_type": "export_limit_curtailment",
+            "curtailment_generation_loss_kwh": generation_loss_kwh,
+            "curtailment_revenue_loss_gbp": revenue_loss_gbp,
+            "curtailment_confidence": confidence,
+            "curtailment_message": message,
+        }
+
+    def _load_export_limit_history(self) -> pd.DataFrame:
+        if self._export_limit_history_cache is not None:
+            return self._export_limit_history_cache
+
+        history_dir = self.export_limit_history_dir
+        if not history_dir.exists():
+            self._export_limit_history_cache = pd.DataFrame()
+            return self._export_limit_history_cache
+
+        parquet_paths = sorted(history_dir.glob("*.parquet"))
+        candidate_paths = parquet_paths or sorted(history_dir.glob("*.csv"))
+        frames: list[pd.DataFrame] = []
+        for path in candidate_paths:
+            try:
+                if path.suffix == ".parquet":
+                    frame = pd.read_parquet(path)
+                else:
+                    frame = pd.read_csv(path)
+            except Exception:
+                continue
+            if not frame.empty:
+                frames.append(frame)
+
+        if not frames:
+            self._export_limit_history_cache = pd.DataFrame()
+            return self._export_limit_history_cache
+
+        history = pd.concat(frames, ignore_index=True)
+        if "timestamp" in history.columns:
+            history["timestamp"] = pd.to_datetime(history["timestamp"], utc=True, errors="coerce")
+            history = history.dropna(subset=["timestamp"]).copy()
+        if "export_limit_pct" in history.columns:
+            history["export_limit_pct"] = pd.to_numeric(history["export_limit_pct"], errors="coerce")
+        if "is_curtailed" in history.columns:
+            history["is_curtailed"] = history["is_curtailed"].apply(
+                lambda value: str(value).strip().casefold() in {"1", "true", "t", "yes"}
+            )
+        self._export_limit_history_cache = history
+        return history
+
+    def _lookup_export_limit_history_signal(self, plant_uid: str, target_date: date) -> dict[str, Any] | None:
+        history = self._load_export_limit_history()
+        if history.empty or "plant_uid" not in history.columns or "timestamp" not in history.columns:
+            return None
+
+        day_rows = history[
+            (history["plant_uid"].astype(str) == plant_uid)
+            & (history["timestamp"].dt.date == target_date)
+        ].copy()
+        if day_rows.empty or "is_curtailed" not in day_rows.columns:
+            return None
+
+        curtailed_rows = day_rows[day_rows["is_curtailed"]].copy()
+        if curtailed_rows.empty:
+            return None
+
+        min_limit_raw = curtailed_rows.get("export_limit_pct").min()
+        min_limit_pct = float(min_limit_raw) if pd.notna(min_limit_raw) else None
+        return {
+            "records": int(len(day_rows)),
+            "curtailed_records": int(len(curtailed_rows)),
+            "min_limit_pct": min_limit_pct,
+        }
 
     def get_day_curtailment(
         self,
         plant_uid: str,
         target_date: date,
         ppa_rate_gbp_mwh: float | None = None,
-        **kwargs: Any,  # noqa: ARG002
+        **kwargs: Any,
     ) -> dict[str, Any] | None:
+        ppa_rate = _coerce_float(ppa_rate_gbp_mwh)
+        daylight_gap_kwh = self._estimate_generation_loss_kwh(
+            kwargs.get("expected_daylight_kwh"),
+            kwargs.get("actual_daylight_kwh"),
+        )
+        history_signal = self._lookup_export_limit_history_signal(plant_uid, target_date)
+        if history_signal is not None:
+            min_limit_pct = _coerce_float(history_signal.get("min_limit_pct"))
+            min_limit_fragment = (
+                f" Min observed limit was {min_limit_pct:.2f}%."
+                if min_limit_pct is not None
+                else ""
+            )
+            return self._build_curtailment_result(
+                generation_loss_kwh=daylight_gap_kwh,
+                ppa_rate_gbp_mwh=ppa_rate,
+                confidence=0.95,
+                message=(
+                    f"Detected from export-limit history with {history_signal['curtailed_records']} curtailed intervals."
+                    f"{min_limit_fragment}"
+                ),
+            )
+
         start = datetime.combine(target_date, time.min, tzinfo=UTC)
         end = start + timedelta(days=1)
         try:
@@ -392,32 +516,26 @@ class ExportLimitCurtailmentFetcher:
         detection_method = str(summary.get("detection_method", "")).strip()
         curtailed_records = int(summary.get("curtailed_records") or 0)
         generation_loss_kwh = _coerce_float(summary.get("curtailed_energy_kwh"))
-        if (
-            detection_method != "export_limit"
-            or curtailed_records <= 0
-            or generation_loss_kwh is None
-            or generation_loss_kwh <= 0
-        ):
+        if detection_method != "export_limit" or curtailed_records <= 0:
             return None
 
-        ppa_rate = _coerce_float(ppa_rate_gbp_mwh)
-        revenue_loss_gbp = (generation_loss_kwh / 1000.0) * ppa_rate if ppa_rate is not None else None
+        if generation_loss_kwh is None or generation_loss_kwh <= 0:
+            generation_loss_kwh = daylight_gap_kwh
         curtailment_rate_pct = _coerce_float(summary.get("curtailment_rate_pct"))
         rate_fragment = (
             f" Curtailed coverage was {curtailment_rate_pct:.2f}%."
             if curtailment_rate_pct is not None
             else ""
         )
-        return {
-            "curtailment_event_type": "export_limit_curtailment",
-            "curtailment_generation_loss_kwh": generation_loss_kwh,
-            "curtailment_revenue_loss_gbp": revenue_loss_gbp,
-            "curtailment_confidence": 0.95,
-            "curtailment_message": (
+        return self._build_curtailment_result(
+            generation_loss_kwh=generation_loss_kwh,
+            ppa_rate_gbp_mwh=ppa_rate,
+            confidence=0.95,
+            message=(
                 f"Detected from export-limit telemetry with {curtailed_records} curtailed intervals."
                 f"{rate_fragment}"
             ),
-        }
+        )
 
 
 def _normalise_key(value: Any) -> str:
@@ -2845,7 +2963,7 @@ class AssetRegisterAuditService:
                 if isinstance(metrics, dict):
                     row.update(metrics)
 
-            if row.get("has_any_data") and self.curtailment_fetcher is not None:
+            if self.curtailment_fetcher is not None:
                 plant_uid = identifiers.get("juggle", "")
                 if plant_uid:
                     curtailment = self.curtailment_fetcher.get_day_curtailment(
@@ -2855,6 +2973,8 @@ class AssetRegisterAuditService:
                         asset_name=asset_name,
                         match_name=resolution.match_name,
                         preferred_source=row.get("preferred_source", ""),
+                        expected_daylight_kwh=row.get("expected_daylight_kwh"),
+                        actual_daylight_kwh=row.get("actual_daylight_kwh"),
                     )
                     if inspect.isawaitable(curtailment):
                         curtailment = await curtailment

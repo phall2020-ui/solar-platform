@@ -825,6 +825,8 @@ async def test_build_yesterday_dataset_does_not_infer_curtailment_from_daylight_
                 "asset_name": "Newfold Farm",
                 "match_name": "Newfold Farm",
                 "preferred_source": "juggle",
+                "expected_daylight_kwh": 120.0,
+                "actual_daylight_kwh": 100.0,
             },
         )
     ]
@@ -903,6 +905,110 @@ async def test_build_yesterday_dataset_populates_curtailment_from_export_limit_s
     assert row["curtailment_revenue_loss_gbp"] == pytest.approx(1.0625)
     assert row["curtailment_confidence"] == pytest.approx(0.95)
     assert row["curtailment_message"] == "Detected from export-limit telemetry with 8 curtailed intervals."
+
+
+@pytest.mark.asyncio
+async def test_build_yesterday_dataset_keeps_export_limit_curtailment_even_without_source_checker_data(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text(
+        """
+        {
+          "Newfold Farm": {
+            "platform": "juggle",
+            "site_id": "",
+            "juggle_uid": "ERS:00001"
+          }
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    notion = FakeNotionAssetRegisterService(
+        [
+            {
+                "Alias": "Newfold Farm",
+                "PAC Date": "2026-03-01",
+                "PPA Rate (GBP/MWh)": "85",
+                "TIC kWp": 500,
+            }
+        ]
+    )
+    metrics_fetcher = FakeDaylightMetricsFetcher(
+        metrics={
+            "capacity_kwp": 500.0,
+            "actual_daylight_kwh": 100.0,
+            "expected_daylight_kwh": 120.0,
+        }
+    )
+    curtailment_fetcher = FakeCurtailmentFetcher(
+        result={
+            "curtailment_event_type": "export_limit_curtailment",
+            "curtailment_generation_loss_kwh": 20.0,
+            "curtailment_revenue_loss_gbp": 1.7,
+            "curtailment_confidence": 0.95,
+            "curtailment_message": "Detected from export-limit history with 2 curtailed intervals.",
+        }
+    )
+
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={"juggle": FakeChecker("juggle", has_data=False, status="no_data")},
+        supported_sources=("juggle",),
+        daylight_metrics_fetcher=metrics_fetcher,
+        curtailment_fetcher=curtailment_fetcher,
+    )
+
+    dataset = await service.build_yesterday_dataset(reference_date=date(2026, 3, 8))
+
+    row = dataset[0]
+    assert row["has_any_data"] is False
+    assert row["curtailment_event_type"] == "export_limit_curtailment"
+    assert row["curtailment_generation_loss_kwh"] == pytest.approx(20.0)
+    assert row["curtailment_revenue_loss_gbp"] == pytest.approx(1.7)
+
+
+def test_export_limit_curtailment_fetcher_uses_historical_signal_to_gate_daylight_gap(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import ExportLimitCurtailmentFetcher
+
+    export_limit_dir = tmp_path / "export_limits"
+    export_limit_dir.mkdir()
+    history_path = export_limit_dir / "export_limits_20250101_20260105.csv"
+    history_path.write_text(
+        "\n".join(
+            [
+                "plant_uid,plant_name,timestamp,export_limit_pct,is_curtailed",
+                "ERS:00001,Newfold Farm,2026-03-07T10:00:00Z,55.0,True",
+                "ERS:00001,Newfold Farm,2026-03-07T10:30:00Z,55.0,True",
+                "ERS:00001,Newfold Farm,2026-03-07T11:00:00Z,100.0,False",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    fetcher = ExportLimitCurtailmentFetcher(
+        curtailment_engine=SimpleNamespace(run=lambda plant_uid, start, end: SimpleNamespace(summary={})),
+        export_limit_history_dir=export_limit_dir,
+    )
+
+    result = fetcher.get_day_curtailment(
+        "ERS:00001",
+        date(2026, 3, 7),
+        ppa_rate_gbp_mwh=85.0,
+        expected_daylight_kwh=120.0,
+        actual_daylight_kwh=100.0,
+    )
+
+    assert result == {
+        "curtailment_event_type": "export_limit_curtailment",
+        "curtailment_generation_loss_kwh": 20.0,
+        "curtailment_revenue_loss_gbp": pytest.approx(1.7),
+        "curtailment_confidence": 0.95,
+        "curtailment_message": "Detected from export-limit history with 2 curtailed intervals. Min observed limit was 55.00%.",
+    }
 
 
 @pytest.mark.asyncio
