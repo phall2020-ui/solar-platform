@@ -32,7 +32,7 @@ concurrency:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       PYTHONPATH: ${{ github.workspace }}/src
       NOTION_ASSET_SYNC_ENABLED: "true"
