@@ -174,6 +174,15 @@ SEVERITY_RANK: dict[str, int] = {
     "critical": 4,
 }
 
+SOURCE_CREDENTIAL_REPORT_ORDER: tuple[str, ...] = (
+    "juggle",
+    "solaredge",
+    "solis",
+    "enphase",
+    "huawei",
+    "sma",
+)
+
 TRIAGE_DATABASE_PROPERTIES: dict[str, dict[str, Any]] = {
     "Asset": {"title": {}},
     "Row Key": {"rich_text": {}},
@@ -290,6 +299,9 @@ DAILY_JSON_DATABASE_PROPERTIES: dict[str, dict[str, Any]] = {
     "SMA Has Data": {"checkbox": {}},
     "SMA Sample Count": {"number": {"format": "number"}},
     "SMA Message": {"rich_text": {}},
+    "Trend Days Available": {"number": {"format": "number"}},
+    "Trend Gen Mean (kWh)": {"number": {"format": "number"}},
+    "Trend Availability Mean (%)": {"number": {"format": "percent"}},
     "Daily JSON": {"rich_text": {}},
 }
 
@@ -2191,6 +2203,214 @@ class AssetRegisterAuditService:
     def confirmed_data_source_matches() -> dict[str, str]:
         return dict(DEFAULT_DATA_SOURCE_MATCH_UPDATES)
 
+    @staticmethod
+    def describe_source_credential_preflight() -> dict[str, dict[str, Any]]:
+        def _is_set(name: str) -> bool:
+            return bool(str(os.getenv(name, "")).strip())
+
+        def _missing_fields(*names: str) -> list[str]:
+            return [name for name in names if not _is_set(name)]
+
+        report: dict[str, dict[str, Any]] = {}
+
+        juggle_fields = [name for name in ("JUGGLE_API_KEY", "EMIG_API_KEY") if _is_set(name)]
+        report["juggle"] = {
+            "status": "configured" if juggle_fields else "missing",
+            "detail": (
+                f"credentials present via {', '.join(juggle_fields)}"
+                if juggle_fields
+                else "set JUGGLE_API_KEY or EMIG_API_KEY"
+            ),
+            "present_fields": juggle_fields,
+            "missing_fields": [] if juggle_fields else ["JUGGLE_API_KEY", "EMIG_API_KEY"],
+        }
+
+        solaredge_raw = str(os.getenv("SOLAREDGE_KEYS_JSON", "")).strip()
+        solaredge_keys = _load_solaredge_site_keys()
+        if solaredge_keys:
+            solaredge_status = "configured"
+            solaredge_detail = f"{len(solaredge_keys)} site-specific API key entries loaded"
+            solaredge_missing_fields: list[str] = []
+        elif solaredge_raw:
+            solaredge_status = "partial"
+            solaredge_detail = "SOLAREDGE_KEYS_JSON is set but empty or invalid"
+            solaredge_missing_fields = []
+        else:
+            solaredge_status = "missing"
+            solaredge_detail = "set SOLAREDGE_KEYS_JSON with site_id to api_key entries"
+            solaredge_missing_fields = ["SOLAREDGE_KEYS_JSON"]
+        report["solaredge"] = {
+            "status": solaredge_status,
+            "detail": solaredge_detail,
+            "present_fields": ["SOLAREDGE_KEYS_JSON"] if solaredge_raw else [],
+            "missing_fields": solaredge_missing_fields,
+        }
+
+        solis_missing = _missing_fields("SOLIS_KEY_ID", "SOLIS_KEY_SECRET")
+        report["solis"] = {
+            "status": "configured" if not solis_missing else "partial" if len(solis_missing) == 1 else "missing",
+            "detail": (
+                "credentials present via SOLIS_KEY_ID and SOLIS_KEY_SECRET"
+                if not solis_missing
+                else f"missing {', '.join(solis_missing)}"
+            ),
+            "present_fields": [name for name in ("SOLIS_KEY_ID", "SOLIS_KEY_SECRET") if _is_set(name)],
+            "missing_fields": solis_missing,
+        }
+
+        enphase_missing = _missing_fields("ENPHASE_CLIENT_ID", "ENPHASE_CLIENT_SECRET", "ENPHASE_API_KEY")
+        report["enphase"] = {
+            "status": "configured" if not enphase_missing else "partial" if len(enphase_missing) < 3 else "missing",
+            "detail": (
+                "credentials present via ENPHASE_CLIENT_ID, ENPHASE_CLIENT_SECRET, and ENPHASE_API_KEY"
+                if not enphase_missing
+                else f"missing {', '.join(enphase_missing)}"
+            ),
+            "present_fields": [
+                name
+                for name in ("ENPHASE_CLIENT_ID", "ENPHASE_CLIENT_SECRET", "ENPHASE_API_KEY")
+                if _is_set(name)
+            ],
+            "missing_fields": enphase_missing,
+        }
+
+        huawei_missing = _missing_fields("HUAWEI_USERNAME", "HUAWEI_PASSWORD")
+        report["huawei"] = {
+            "status": "configured" if not huawei_missing else "partial" if len(huawei_missing) == 1 else "missing",
+            "detail": (
+                "credentials present via HUAWEI_USERNAME and HUAWEI_PASSWORD"
+                if not huawei_missing
+                else f"missing {', '.join(huawei_missing)}"
+            ),
+            "present_fields": [name for name in ("HUAWEI_USERNAME", "HUAWEI_PASSWORD") if _is_set(name)],
+            "missing_fields": huawei_missing,
+        }
+
+        sma_client_pair = _is_set("SMA_CLIENT_ID") and _is_set("SMA_CLIENT_SECRET")
+        sma_user_pair = _is_set("SMA_USERNAME") and _is_set("SMA_PASSWORD")
+        sma_present = [
+            name
+            for name in ("SMA_CLIENT_ID", "SMA_CLIENT_SECRET", "SMA_USERNAME", "SMA_PASSWORD")
+            if _is_set(name)
+        ]
+        if sma_client_pair:
+            sma_status = "configured"
+            sma_detail = "credentials present via SMA_CLIENT_ID and SMA_CLIENT_SECRET"
+            sma_missing_fields: list[str] = []
+        elif sma_user_pair:
+            sma_status = "configured"
+            sma_detail = "credentials present via SMA_USERNAME and SMA_PASSWORD"
+            sma_missing_fields = []
+        elif sma_present:
+            sma_status = "partial"
+            sma_detail = "provide either SMA_CLIENT_ID and SMA_CLIENT_SECRET or SMA_USERNAME and SMA_PASSWORD"
+            sma_missing_fields = [
+                "SMA_CLIENT_ID/SMA_CLIENT_SECRET or SMA_USERNAME/SMA_PASSWORD"
+            ]
+        else:
+            sma_status = "missing"
+            sma_detail = "set SMA_CLIENT_ID and SMA_CLIENT_SECRET or SMA_USERNAME and SMA_PASSWORD"
+            sma_missing_fields = [
+                "SMA_CLIENT_ID/SMA_CLIENT_SECRET or SMA_USERNAME/SMA_PASSWORD"
+            ]
+        report["sma"] = {
+            "status": sma_status,
+            "detail": sma_detail,
+            "present_fields": sma_present,
+            "missing_fields": sma_missing_fields,
+        }
+
+        return {source: report[source] for source in SOURCE_CREDENTIAL_REPORT_ORDER}
+
+    def _build_asset_processing_error_row(
+        self,
+        *,
+        asset: dict[str, Any],
+        today: date,
+        target_date: date,
+        error: Exception,
+    ) -> dict[str, Any]:
+        asset_name = _extract_asset_name(asset)
+        pac_date = asset.get("_pac_date")
+        pac_phase = str(asset.get("_pac_phase", _derive_pac_phase(pac_date, today)))
+        error_message = str(error).strip() or error.__class__.__name__
+        row: dict[str, Any] = {
+            "asset_name": asset_name,
+            "target_date": target_date.isoformat(),
+            "pac_date": pac_date.isoformat() if isinstance(pac_date, date) else "",
+            "pac_phase": pac_phase,
+            "pac_in_past": pac_phase == "post_pac",
+            "pac_date_missing": pac_phase == "unknown",
+            "notion_page_id": asset.get("notion_page_id", ""),
+            "notion_url": asset.get("notion_url", ""),
+            "match_name": "",
+            "match_method": "asset_processing_error",
+            "match_confidence": 0.0,
+            "resolved_source_types": "",
+            "resolution_notes": error_message,
+            "capacity_kwp": _extract_capacity_kwp(asset),
+            "ppa_rate_gbp_mwh": None,
+            "ppa_rate_source": "",
+            "target_pr_assumption_ratio": TARGET_PR_ASSUMPTION,
+            "target_gen_yesterday_kwh": None,
+            "target_revenue_yesterday_gbp": None,
+            "target_weather_yesterday": "",
+            "target_gen_today_kwh": None,
+            "target_revenue_today_gbp": None,
+            "target_weather_today": "",
+            "target_gen_week_kwh": None,
+            "target_revenue_week_gbp": None,
+            "target_weather_week": "",
+            "target_revenue_message": "",
+            "curtailment_event_type": "",
+            "curtailment_generation_loss_kwh": None,
+            "curtailment_revenue_loss_gbp": None,
+            "curtailment_confidence": None,
+            "curtailment_message": "",
+            "irradiance_source": "",
+            "irradiance_device_id": "",
+            "irradiance_threshold_wm2": None,
+            "daylight_hh_periods": 0,
+            "available_hh_periods": 0,
+            "availability_ratio": None,
+            "actual_daylight_kwh": None,
+            "expected_daylight_kwh": None,
+            "h_poa_daylight_kwh_m2": None,
+            "performance_ratio": None,
+            "irradiance_message": "",
+            "inverter_count": 0,
+            "inverters_reporting": 0,
+            "best_inverter_availability_ratio": None,
+            "worst_inverter_availability_ratio": None,
+            "inverter_availability_summary": "",
+            "inverter_availability_breakdown": [],
+            "checked_sources": "",
+            "sources_with_data": "",
+            "has_any_data": False,
+            "preferred_source": "",
+        }
+        row.update(_extract_asset_context(asset))
+        for source in self.supported_sources:
+            row[f"{source}_identifier"] = ""
+            row[f"{source}_status"] = "not_checked"
+            row[f"{source}_has_data"] = False
+            row[f"{source}_sample_count"] = 0
+            row[f"{source}_message"] = ""
+
+        finding = _build_finding(
+            finding_type="asset_processing_error",
+            severity="high",
+            confidence=0.95,
+            summary="The audit failed while processing this asset.",
+            recommended_action="Review the asset row, source mapping, and downstream service responses, then rerun the audit.",
+            context={"error": error_message},
+        )
+        row["findings"] = [finding]
+        row["finding_types"] = ["asset_processing_error"]
+        row["actionable_finding_count"] = 1
+        row["highest_finding_severity"] = "high"
+        return row
+
     def get_assets_with_past_pac_date(
         self,
         as_of_date: date | None = None,
@@ -2384,6 +2604,17 @@ class AssetRegisterAuditService:
                 ordered.append(source)
 
         return [source for source in ordered if source in self.supported_sources]
+
+    @staticmethod
+    def _is_actionable_audit_candidate(
+        *,
+        pac_phase: str,
+        identifiers: dict[str, str],
+        resolution: MatchResolution,
+    ) -> bool:
+        if pac_phase != "post_pac":
+            return False
+        return bool(identifiers) or resolution.mapping is not None
 
     def _select_metrics_source(
         self,
@@ -2952,6 +3183,8 @@ class AssetRegisterAuditService:
         reference_date: date | None = None,
         force_refresh: bool = False,
         asset_filter: str | None = None,
+        *,
+        actionable_only: bool = False,
     ) -> list[dict[str, Any]]:
         today = reference_date or datetime.now(UTC).date()
         target_date = today - timedelta(days=1)
@@ -2963,202 +3196,226 @@ class AssetRegisterAuditService:
 
         rows: list[dict[str, Any]] = []
         for asset in assets:
-            asset_name = _extract_asset_name(asset)
-            pac_date = asset.get("_pac_date")
-            pac_phase = str(asset.get("_pac_phase", _derive_pac_phase(pac_date, today)))
-            capacity_kwp = _extract_capacity_kwp(asset)
-            ppa_rate_gbp_mwh, ppa_rate_source = _extract_ppa_rate_gbp_mwh(asset)
-            resolution = self._resolve_match(asset)
-            identifiers = self._infer_identifiers(asset, resolution)
-            candidate_sources = self._infer_candidate_sources(asset, identifiers, resolution)
-            source_results: dict[str, SourceCheckResult] = {}
-
-            for source in candidate_sources:
-                checker = self.checkers.get(source)
-                identifier = identifiers.get(source)
-                if checker is None:
-                    source_results[source] = SourceCheckResult(
-                        source=source,
-                        status="unconfigured",
-                        identifier=identifier,
-                        target_date=target_date.isoformat(),
-                        has_data=False,
-                        message="checker not configured",
-                    )
-                elif not identifier:
-                    source_results[source] = SourceCheckResult(
-                        source=source,
-                        status="missing_identifier",
-                        identifier=None,
-                        target_date=target_date.isoformat(),
-                        has_data=False,
-                        message="no source identifier available",
-                    )
-                else:
-                    result = await checker.check_day(identifier, target_date)
-                    if isinstance(result, dict):
-                        result = SourceCheckResult(**result)
-                    source_results[source] = result
-
-            row: dict[str, Any] = {
-                "asset_name": asset_name,
-                "target_date": target_date.isoformat(),
-                "pac_date": pac_date.isoformat() if isinstance(pac_date, date) else "",
-                "pac_phase": pac_phase,
-                "pac_in_past": pac_phase == "post_pac",
-                "pac_date_missing": pac_phase == "unknown",
-                "notion_page_id": asset.get("notion_page_id", ""),
-                "notion_url": asset.get("notion_url", ""),
-                "match_name": resolution.match_name,
-                "match_method": resolution.match_method,
-                "match_confidence": resolution.match_confidence,
-                "resolved_source_types": ",".join(sorted(identifiers)),
-                "resolution_notes": resolution.resolution_notes,
-                "capacity_kwp": capacity_kwp,
-                "ppa_rate_gbp_mwh": ppa_rate_gbp_mwh,
-                "ppa_rate_source": ppa_rate_source,
-                "target_pr_assumption_ratio": TARGET_PR_ASSUMPTION,
-                "target_gen_yesterday_kwh": None,
-                "target_revenue_yesterday_gbp": None,
-                "target_weather_yesterday": "",
-                "target_gen_today_kwh": None,
-                "target_revenue_today_gbp": None,
-                "target_weather_today": "",
-                "target_gen_week_kwh": None,
-                "target_revenue_week_gbp": None,
-                "target_weather_week": "",
-                "target_revenue_message": "",
-                "curtailment_event_type": "",
-                "curtailment_generation_loss_kwh": None,
-                "curtailment_revenue_loss_gbp": None,
-                "curtailment_confidence": None,
-                "curtailment_message": "",
-                "irradiance_source": "",
-                "irradiance_device_id": "",
-                "irradiance_threshold_wm2": None,
-                "daylight_hh_periods": 0,
-                "available_hh_periods": 0,
-                "availability_ratio": None,
-                "actual_daylight_kwh": None,
-                "expected_daylight_kwh": None,
-                "h_poa_daylight_kwh_m2": None,
-                "performance_ratio": None,
-                "irradiance_message": "",
-                "inverter_count": 0,
-                "inverters_reporting": 0,
-                "best_inverter_availability_ratio": None,
-                "worst_inverter_availability_ratio": None,
-                "inverter_availability_summary": "",
-                "inverter_availability_breakdown": [],
-                "findings": [],
-                "finding_types": [],
-                "actionable_finding_count": 0,
-                "highest_finding_severity": "",
-            }
-            row.update(_extract_asset_context(asset))
-
-            if self.daylight_metrics_fetcher is not None:
-                target_metrics_getter = getattr(self.daylight_metrics_fetcher, "get_target_metrics", None)
-                if callable(target_metrics_getter):
-                    target_metrics = target_metrics_getter(
-                        reference_date=today,
-                        capacity_kwp=capacity_kwp,
-                        ppa_rate_gbp_mwh=ppa_rate_gbp_mwh,
-                        asset_name=asset_name,
-                        match_name=resolution.match_name,
-                    )
-                    if inspect.isawaitable(target_metrics):
-                        target_metrics = await target_metrics
-                if isinstance(target_metrics, dict):
-                    row.update(target_metrics)
-                    if ppa_rate_source == DEFAULT_PPA_RATE_SOURCE:
-                        existing_message = str(row.get("target_revenue_message", "")).strip()
-                        fallback_message = f"Using {DEFAULT_PPA_RATE_SOURCE} because the asset register PPA rate is missing or invalid."
-                        row["target_revenue_message"] = (
-                            f"{existing_message} | {fallback_message}"
-                            if existing_message
-                            else fallback_message
-                        )
-
-            sources_with_data: list[str] = []
-            for source in self.supported_sources:
-                result = source_results.get(source)
-                identifier = identifiers.get(source)
-                row[f"{source}_identifier"] = identifier or ""
-                if result is None:
-                    row[f"{source}_status"] = "unconfigured"
-                    row[f"{source}_has_data"] = False
-                    row[f"{source}_sample_count"] = 0
-                    row[f"{source}_message"] = ""
+            try:
+                asset_name = _extract_asset_name(asset)
+                pac_date = asset.get("_pac_date")
+                pac_phase = str(asset.get("_pac_phase", _derive_pac_phase(pac_date, today)))
+                capacity_kwp = _extract_capacity_kwp(asset)
+                ppa_rate_gbp_mwh, ppa_rate_source = _extract_ppa_rate_gbp_mwh(asset)
+                resolution = self._resolve_match(asset)
+                identifiers = self._infer_identifiers(asset, resolution)
+                if actionable_only and not self._is_actionable_audit_candidate(
+                    pac_phase=pac_phase,
+                    identifiers=identifiers,
+                    resolution=resolution,
+                ):
                     continue
+                candidate_sources = self._infer_candidate_sources(asset, identifiers, resolution)
+                source_results: dict[str, SourceCheckResult] = {}
 
-                row[f"{source}_status"] = result.status
-                row[f"{source}_has_data"] = result.has_data
-                row[f"{source}_sample_count"] = result.sample_count
-                row[f"{source}_message"] = result.message
-                if result.has_data:
-                    sources_with_data.append(source)
+                for source in candidate_sources:
+                    checker = self.checkers.get(source)
+                    identifier = identifiers.get(source)
+                    if checker is None:
+                        source_results[source] = SourceCheckResult(
+                            source=source,
+                            status="unconfigured",
+                            identifier=identifier,
+                            target_date=target_date.isoformat(),
+                            has_data=False,
+                            message="checker not configured",
+                        )
+                    elif not identifier:
+                        source_results[source] = SourceCheckResult(
+                            source=source,
+                            status="missing_identifier",
+                            identifier=None,
+                            target_date=target_date.isoformat(),
+                            has_data=False,
+                            message="no source identifier available",
+                        )
+                    else:
+                        result = await checker.check_day(identifier, target_date)
+                        if isinstance(result, dict):
+                            result = SourceCheckResult(**result)
+                        source_results[source] = result
 
-            row["checked_sources"] = ",".join(candidate_sources)
-            row["sources_with_data"] = ",".join(sources_with_data)
-            row["has_any_data"] = bool(sources_with_data)
-            row["preferred_source"] = sources_with_data[0] if sources_with_data else ""
-            metrics_source = self._select_metrics_source(
-                source_results=source_results,
-                candidate_sources=candidate_sources,
-                identifiers=identifiers,
-            )
-            if metrics_source and self.daylight_metrics_fetcher is not None:
-                identifier = identifiers.get(metrics_source, "")
-                metrics = self.daylight_metrics_fetcher.get_day_metrics(
-                    identifier,
-                    target_date,
-                    capacity_kwp=capacity_kwp,
-                    asset_name=asset_name,
-                    match_name=resolution.match_name,
-                    source=metrics_source,
+                row: dict[str, Any] = {
+                    "asset_name": asset_name,
+                    "target_date": target_date.isoformat(),
+                    "pac_date": pac_date.isoformat() if isinstance(pac_date, date) else "",
+                    "pac_phase": pac_phase,
+                    "pac_in_past": pac_phase == "post_pac",
+                    "pac_date_missing": pac_phase == "unknown",
+                    "notion_page_id": asset.get("notion_page_id", ""),
+                    "notion_url": asset.get("notion_url", ""),
+                    "match_name": resolution.match_name,
+                    "match_method": resolution.match_method,
+                    "match_confidence": resolution.match_confidence,
+                    "resolved_source_types": ",".join(sorted(identifiers)),
+                    "resolution_notes": resolution.resolution_notes,
+                    "capacity_kwp": capacity_kwp,
+                    "ppa_rate_gbp_mwh": ppa_rate_gbp_mwh,
+                    "ppa_rate_source": ppa_rate_source,
+                    "target_pr_assumption_ratio": TARGET_PR_ASSUMPTION,
+                    "target_gen_yesterday_kwh": None,
+                    "target_revenue_yesterday_gbp": None,
+                    "target_weather_yesterday": "",
+                    "target_gen_today_kwh": None,
+                    "target_revenue_today_gbp": None,
+                    "target_weather_today": "",
+                    "target_gen_week_kwh": None,
+                    "target_revenue_week_gbp": None,
+                    "target_weather_week": "",
+                    "target_revenue_message": "",
+                    "curtailment_event_type": "",
+                    "curtailment_generation_loss_kwh": None,
+                    "curtailment_revenue_loss_gbp": None,
+                    "curtailment_confidence": None,
+                    "curtailment_message": "",
+                    "irradiance_source": "",
+                    "irradiance_device_id": "",
+                    "irradiance_threshold_wm2": None,
+                    "daylight_hh_periods": 0,
+                    "available_hh_periods": 0,
+                    "availability_ratio": None,
+                    "actual_daylight_kwh": None,
+                    "expected_daylight_kwh": None,
+                    "h_poa_daylight_kwh_m2": None,
+                    "performance_ratio": None,
+                    "irradiance_message": "",
+                    "inverter_count": 0,
+                    "inverters_reporting": 0,
+                    "best_inverter_availability_ratio": None,
+                    "worst_inverter_availability_ratio": None,
+                    "inverter_availability_summary": "",
+                    "inverter_availability_breakdown": [],
+                    "findings": [],
+                    "finding_types": [],
+                    "actionable_finding_count": 0,
+                    "highest_finding_severity": "",
+                }
+                row.update(_extract_asset_context(asset))
+
+                if self.daylight_metrics_fetcher is not None:
+                    target_metrics_getter = getattr(self.daylight_metrics_fetcher, "get_target_metrics", None)
+                    target_metrics = None
+                    if callable(target_metrics_getter):
+                        target_metrics = target_metrics_getter(
+                            reference_date=today,
+                            capacity_kwp=capacity_kwp,
+                            ppa_rate_gbp_mwh=ppa_rate_gbp_mwh,
+                            asset_name=asset_name,
+                            match_name=resolution.match_name,
+                        )
+                        if inspect.isawaitable(target_metrics):
+                            target_metrics = await target_metrics
+                    if isinstance(target_metrics, dict):
+                        row.update(target_metrics)
+                        if ppa_rate_source == DEFAULT_PPA_RATE_SOURCE:
+                            existing_message = str(row.get("target_revenue_message", "")).strip()
+                            fallback_message = f"Using {DEFAULT_PPA_RATE_SOURCE} because the asset register PPA rate is missing or invalid."
+                            row["target_revenue_message"] = (
+                                f"{existing_message} | {fallback_message}"
+                                if existing_message
+                                else fallback_message
+                            )
+
+                sources_with_data: list[str] = []
+                for source in self.supported_sources:
+                    result = source_results.get(source)
+                    identifier = identifiers.get(source)
+                    row[f"{source}_identifier"] = identifier or ""
+                    if result is None:
+                        row[f"{source}_status"] = "unconfigured"
+                        row[f"{source}_has_data"] = False
+                        row[f"{source}_sample_count"] = 0
+                        row[f"{source}_message"] = ""
+                        continue
+
+                    row[f"{source}_status"] = result.status
+                    row[f"{source}_has_data"] = result.has_data
+                    row[f"{source}_sample_count"] = result.sample_count
+                    row[f"{source}_message"] = result.message
+                    if result.has_data:
+                        sources_with_data.append(source)
+
+                row["checked_sources"] = ",".join(candidate_sources)
+                row["sources_with_data"] = ",".join(sources_with_data)
+                row["has_any_data"] = bool(sources_with_data)
+                row["preferred_source"] = sources_with_data[0] if sources_with_data else ""
+                metrics_source = self._select_metrics_source(
+                    source_results=source_results,
+                    candidate_sources=candidate_sources,
+                    identifiers=identifiers,
                 )
-                if inspect.isawaitable(metrics):
-                    metrics = await metrics
-                if isinstance(metrics, dict):
-                    row.update(metrics)
-
-            if self.curtailment_fetcher is not None:
-                plant_uid = identifiers.get("juggle", "")
-                if plant_uid:
-                    curtailment = self.curtailment_fetcher.get_day_curtailment(
-                        plant_uid,
+                if metrics_source and self.daylight_metrics_fetcher is not None:
+                    identifier = identifiers.get(metrics_source, "")
+                    metrics = self.daylight_metrics_fetcher.get_day_metrics(
+                        identifier,
                         target_date,
-                        ppa_rate_gbp_mwh=_coerce_float(row.get("ppa_rate_gbp_mwh")),
+                        capacity_kwp=capacity_kwp,
                         asset_name=asset_name,
                         match_name=resolution.match_name,
-                        preferred_source=row.get("preferred_source", ""),
-                        expected_daylight_kwh=row.get("expected_daylight_kwh"),
-                        actual_daylight_kwh=row.get("actual_daylight_kwh"),
+                        source=metrics_source,
                     )
-                    if inspect.isawaitable(curtailment):
-                        curtailment = await curtailment
-                    if isinstance(curtailment, dict):
-                        for key in (
-                            "curtailment_event_type",
-                            "curtailment_generation_loss_kwh",
-                            "curtailment_revenue_loss_gbp",
-                            "curtailment_confidence",
-                            "curtailment_message",
-                        ):
-                            row[key] = curtailment.get(key, row.get(key))
-            findings = self._build_findings_for_row(
-                row=row,
-                identifiers=identifiers,
-                resolution=resolution,
-                target_date=target_date,
-            )
-            row["findings"] = findings
-            row["finding_types"] = [str(item.get("finding_type", "")).strip() for item in findings if item.get("finding_type")]
-            row["actionable_finding_count"] = sum(1 for item in findings if _severity_sort_key(item.get("severity")) >= _severity_sort_key("medium"))
-            highest_severity = max((item.get("severity", "") for item in findings), key=_severity_sort_key, default="")
-            row["highest_finding_severity"] = str(highest_severity or "")
-            rows.append(row)
+                    if inspect.isawaitable(metrics):
+                        metrics = await metrics
+                    if isinstance(metrics, dict):
+                        row.update(metrics)
+
+                if self.curtailment_fetcher is not None:
+                    plant_uid = identifiers.get("juggle", "")
+                    if plant_uid:
+                        curtailment = self.curtailment_fetcher.get_day_curtailment(
+                            plant_uid,
+                            target_date,
+                            ppa_rate_gbp_mwh=_coerce_float(row.get("ppa_rate_gbp_mwh")),
+                            asset_name=asset_name,
+                            match_name=resolution.match_name,
+                            preferred_source=row.get("preferred_source", ""),
+                            expected_daylight_kwh=row.get("expected_daylight_kwh"),
+                            actual_daylight_kwh=row.get("actual_daylight_kwh"),
+                        )
+                        if inspect.isawaitable(curtailment):
+                            curtailment = await curtailment
+                        if isinstance(curtailment, dict):
+                            for key in (
+                                "curtailment_event_type",
+                                "curtailment_generation_loss_kwh",
+                                "curtailment_revenue_loss_gbp",
+                                "curtailment_confidence",
+                                "curtailment_message",
+                            ):
+                                row[key] = curtailment.get(key, row.get(key))
+                findings = self._build_findings_for_row(
+                    row=row,
+                    identifiers=identifiers,
+                    resolution=resolution,
+                    target_date=target_date,
+                )
+                row["findings"] = findings
+                row["finding_types"] = [str(item.get("finding_type", "")).strip() for item in findings if item.get("finding_type")]
+                row["actionable_finding_count"] = sum(1 for item in findings if _severity_sort_key(item.get("severity")) >= _severity_sort_key("medium"))
+                highest_severity = max((item.get("severity", "") for item in findings), key=_severity_sort_key, default="")
+                row["highest_finding_severity"] = str(highest_severity or "")
+                rows.append(row)
+            except Exception as exc:
+                logger.exception(
+                    "asset_register_audit_asset_failed",
+                    extra={
+                        "asset_name": _extract_asset_name(asset),
+                        "target_date": target_date.isoformat(),
+                    },
+                )
+                rows.append(
+                    self._build_asset_processing_error_row(
+                        asset=asset,
+                        today=today,
+                        target_date=target_date,
+                        error=exc,
+                    )
+                )
 
         return rows
 
@@ -3175,6 +3432,29 @@ class AssetRegisterAuditService:
             asset_filter=asset_filter,
         )
         return self._build_triage_records_from_dataset(dataset, include_healthy=include_healthy)
+
+    # ------------------------------------------------------------------
+    # Pre-publish validation
+    # ------------------------------------------------------------------
+
+    DAILY_REQUIRED_FIELDS: tuple[str, ...] = ("asset_name", "target_date", "match_method")
+    TRIAGE_REQUIRED_FIELDS: tuple[str, ...] = ("row_key", "asset_name", "target_date", "issue_type")
+
+    @staticmethod
+    def validate_dataset_rows(
+        rows: list[dict[str, Any]],
+        required_fields: tuple[str, ...] | list[str],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Split *rows* into (valid, rejected) based on required-field presence."""
+        valid: list[dict[str, Any]] = []
+        rejected: list[dict[str, Any]] = []
+        for row in rows:
+            missing = [f for f in required_fields if not str(row.get(f, "")).strip()]
+            if missing:
+                rejected.append({**row, "_validation_missing_fields": missing})
+            else:
+                valid.append(row)
+        return valid, rejected
 
     def _build_triage_records_from_dataset(
         self,
@@ -3244,6 +3524,11 @@ class AssetRegisterAuditService:
             ]
         else:
             rows_to_publish = list(dataset)
+
+        rows_to_publish, rejected = self.validate_dataset_rows(rows_to_publish, self.DAILY_REQUIRED_FIELDS)
+        if rejected:
+            logger.warning("daily_publish_validation_rejected: %d rows", len(rejected))
+
         target_database_id = str(database_id or "").strip()
         if not target_database_id:
             target_database_id = self.notion_service.ensure_database(
@@ -3354,6 +3639,9 @@ class AssetRegisterAuditService:
                 "SMA Has Data": {"checkbox": bool(row.get("sma_has_data"))},
                 "SMA Sample Count": {"number": float(row.get("sma_sample_count", 0) or 0)},
                 "SMA Message": _text_property(row.get("sma_message")),
+                "Trend Days Available": _number_property(row.get("trend_days_available")),
+                "Trend Gen Mean (kWh)": _number_property(row.get("trend_gen_mean_kwh")),
+                "Trend Availability Mean (%)": _number_property(row.get("trend_availability_mean")),
                 "Daily JSON": _text_property(json.dumps(row, sort_keys=True)),
             }
             page_id = self.notion_service.upsert_database_page(
@@ -3379,6 +3667,10 @@ class AssetRegisterAuditService:
         triage_records: list[dict[str, Any]],
         parent_page_id: str | None = None,
     ) -> dict[str, Any]:
+        triage_records, rejected = self.validate_dataset_rows(triage_records, self.TRIAGE_REQUIRED_FIELDS)
+        if rejected:
+            logger.warning("triage_publish_validation_rejected: %d rows", len(rejected))
+
         database_id = self.notion_service.ensure_database(
             TRIAGE_DATABASE_TITLE,
             TRIAGE_DATABASE_PROPERTIES,
@@ -3426,6 +3718,56 @@ class AssetRegisterAuditService:
 
         return {"database_id": database_id, "published": published, "failed": failed}
 
+    # ------------------------------------------------------------------
+    # 7-day rolling trend context
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def enrich_dataset_with_rolling_trend(
+        dataset: list[dict[str, Any]],
+        output_dir: Path,
+        reference_date: date,
+        lookback_days: int = 7,
+    ) -> list[dict[str, Any]]:
+        """Add 7-day rolling generation/availability trend fields to each row.
+
+        Scans *output_dir* for cached daily JSON datasets from the preceding
+        *lookback_days* and computes per-asset mean generation and availability.
+        """
+        history: dict[str, list[dict[str, Any]]] = {}
+        for offset in range(1, lookback_days + 1):
+            day = reference_date - timedelta(days=offset)
+            cached = _load_cached_audit_dataset(output_dir, day)
+            if not cached:
+                continue
+            for row in cached:
+                name = str(row.get("asset_name", "")).strip()
+                if name:
+                    history.setdefault(name, []).append(row)
+
+        for row in dataset:
+            asset_name = str(row.get("asset_name", "")).strip()
+            past_rows = history.get(asset_name, [])
+            gen_values = [
+                float(r["actual_daylight_kwh"])
+                for r in past_rows
+                if r.get("actual_daylight_kwh") is not None
+            ]
+            avail_values = [
+                float(r["availability_ratio"])
+                for r in past_rows
+                if r.get("availability_ratio") is not None
+            ]
+            row["trend_days_available"] = len(past_rows)
+            row["trend_gen_mean_kwh"] = (
+                round(sum(gen_values) / len(gen_values), 2) if gen_values else None
+            )
+            row["trend_availability_mean"] = (
+                round(sum(avail_values) / len(avail_values), 4) if avail_values else None
+            )
+
+        return dataset
+
     def write_dataset(
         self,
         dataset: list[dict[str, Any]],
@@ -3464,8 +3806,10 @@ async def run_asset_register_yesterday_audit(
         reference_date=reference_date,
         force_refresh=force_refresh,
         asset_filter=asset_filter,
+        actionable_only=True,
     )
     target_date = (reference_date or datetime.now(UTC).date()) - timedelta(days=1)
+    service.enrich_dataset_with_rolling_trend(dataset, output_dir, target_date)
     paths = service.write_dataset(dataset, output_dir=output_dir, target_date=target_date.isoformat())
     return {
         "target_date": target_date.isoformat(),
@@ -3507,6 +3851,7 @@ async def run_asset_register_triage_publish(
             reference_date=reference_date,
             force_refresh=force_refresh,
             asset_filter=asset_filter,
+            actionable_only=True,
         )
     triage_records = service._build_triage_records_from_dataset(dataset, include_healthy=include_healthy)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -3540,6 +3885,7 @@ async def run_asset_register_daily_publish(
             reference_date=reference_date,
             force_refresh=force_refresh,
             asset_filter=asset_filter,
+            actionable_only=True,
         )
     output_dir.mkdir(parents=True, exist_ok=True)
     daily_json_path = output_dir / f"asset_daily_records_{target_date.isoformat()}.json"

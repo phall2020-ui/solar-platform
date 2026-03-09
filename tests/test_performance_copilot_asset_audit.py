@@ -227,6 +227,49 @@ class FakeForecastIrradianceFetcher:
         return pd.DataFrame(self.rows)
 
 
+def test_describe_source_credential_preflight_reports_configured_partial_and_missing(monkeypatch) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    for key in (
+        "JUGGLE_API_KEY",
+        "EMIG_API_KEY",
+        "SOLAREDGE_KEYS_JSON",
+        "SOLIS_KEY_ID",
+        "SOLIS_KEY_SECRET",
+        "ENPHASE_CLIENT_ID",
+        "ENPHASE_CLIENT_SECRET",
+        "ENPHASE_API_KEY",
+        "HUAWEI_USERNAME",
+        "HUAWEI_PASSWORD",
+        "SMA_CLIENT_ID",
+        "SMA_CLIENT_SECRET",
+        "SMA_USERNAME",
+        "SMA_PASSWORD",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    monkeypatch.setenv("EMIG_API_KEY", "emig-token")
+    monkeypatch.setenv("SOLAREDGE_KEYS_JSON", "not-json")
+    monkeypatch.setenv("SOLIS_KEY_ID", "solis-key-id")
+    monkeypatch.setenv("ENPHASE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("ENPHASE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("ENPHASE_API_KEY", "api-key")
+    monkeypatch.setenv("SMA_USERNAME", "sma-user")
+    monkeypatch.setenv("SMA_PASSWORD", "sma-pass")
+
+    report = AssetRegisterAuditService.describe_source_credential_preflight()
+
+    assert report["juggle"]["status"] == "configured"
+    assert report["juggle"]["present_fields"] == ["EMIG_API_KEY"]
+    assert report["solaredge"]["status"] == "partial"
+    assert report["solaredge"]["detail"] == "SOLAREDGE_KEYS_JSON is set but empty or invalid"
+    assert report["solis"]["status"] == "partial"
+    assert report["solis"]["missing_fields"] == ["SOLIS_KEY_SECRET"]
+    assert report["enphase"]["status"] == "configured"
+    assert report["huawei"]["status"] == "missing"
+    assert report["sma"]["status"] == "configured"
+
+
 def test_get_assets_with_past_pac_date_filters_future_and_missing_dates(tmp_path) -> None:
     from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
 
@@ -319,6 +362,56 @@ async def test_build_yesterday_dataset_normalises_ppa_rate_to_gbp_per_mwh(tmp_pa
 
     assert row["ppa_rate_gbp_mwh"] == pytest.approx(85.0)
     assert row["ppa_rate_source"] == "PPA Rate (p/kWh)"
+
+
+@pytest.mark.asyncio
+async def test_build_yesterday_dataset_actionable_only_filters_to_post_pac_assets_with_known_matches(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text(
+        json.dumps(
+            {
+                "post pac mapped": {
+                    "_mapping_name": "Post PAC Mapped",
+                    "juggle_uid": "AMP:00001",
+                },
+                "pre pac mapped": {
+                    "_mapping_name": "Pre PAC Mapped",
+                    "juggle_uid": "AMP:00002",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    notion = FakeNotionAssetRegisterService(
+        [
+            {"Alias": "Post PAC Mapped", "PAC Date": "2026-03-01"},
+            {"Alias": "Pre PAC Mapped", "PAC Date": "2026-03-20"},
+            {"Alias": "Post PAC Direct", "PAC Date": "2026-03-01", "Plant UID": "AMP:00003"},
+            {"Alias": "ZZZ Totally Unmatched Asset", "PAC Date": "2026-03-01"},
+        ]
+    )
+    checker = FakeChecker("juggle", has_data=True)
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={"juggle": checker},
+        daylight_metrics_fetcher=FakeDaylightMetricsFetcher(),
+    )
+
+    dataset = await service.build_yesterday_dataset(
+        reference_date=date(2026, 3, 8),
+        actionable_only=True,
+    )
+
+    assert [row["asset_name"] for row in dataset] == ["Post PAC Mapped", "Post PAC Direct"]
+    assert checker.calls == [
+        ("AMP:00001", date(2026, 3, 7)),
+        ("AMP:00003", date(2026, 3, 7)),
+    ]
 
 
 @pytest.mark.asyncio
@@ -1702,6 +1795,63 @@ async def test_build_yesterday_dataset_populates_findings_and_rollups(tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_build_yesterday_dataset_degrades_failed_asset_to_error_row_and_continues(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    class ExplodingMetricsFetcher(FakeDaylightMetricsFetcher):
+        def get_day_metrics(self, identifier: str, target_date: date, capacity_kwp: float | None = None, **kwargs):  # noqa: ANN001
+            if kwargs.get("asset_name") == "Broken Asset":
+                raise RuntimeError("weather service unavailable")
+            return {
+                "availability_ratio": 1.0,
+                "actual_daylight_kwh": 5.0,
+                "expected_daylight_kwh": 5.0,
+            }
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text(
+        json.dumps(
+            {
+                "Broken Asset": {"platform": "juggle", "site_id": "", "juggle_uid": "AMP:10001"},
+                "Healthy Asset": {"platform": "juggle", "site_id": "", "juggle_uid": "AMP:10002"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    notion = FakeNotionAssetRegisterService(
+        [
+            {"Alias": "Broken Asset", "PAC Date": "2026-03-01"},
+            {"Alias": "Healthy Asset", "PAC Date": "2026-03-01"},
+        ]
+    )
+
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={"juggle": FakeChecker("juggle", has_data=True)},
+        supported_sources=("juggle",),
+        daylight_metrics_fetcher=ExplodingMetricsFetcher(),
+    )
+
+    dataset = await service.build_yesterday_dataset(reference_date=date(2026, 3, 8))
+
+    assert [row["asset_name"] for row in dataset] == ["Broken Asset", "Healthy Asset"]
+
+    broken = dataset[0]
+    assert broken["match_method"] == "asset_processing_error"
+    assert broken["has_any_data"] is False
+    assert broken["finding_types"] == ["asset_processing_error"]
+    assert broken["highest_finding_severity"] == "high"
+    assert broken["resolution_notes"] == "weather service unavailable"
+
+    healthy = dataset[1]
+    assert healthy["match_method"] == "exact_registry"
+    assert healthy["has_any_data"] is True
+
+
+@pytest.mark.asyncio
 async def test_build_yesterday_dataset_adds_point_lane_stark_fusion_variance_finding(tmp_path) -> None:
     from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
 
@@ -2641,6 +2791,284 @@ async def test_run_asset_register_triage_publish_reuses_cached_dataset(tmp_path,
     assert result["rows"] == 1
     assert result["publish_result"]["published"] == 1
     assert triage_records[0]["finding_type"] == "inverter_meter_comparison"
+
+
+# ---------------------------------------------------------------------------
+# Publish-path edge-case tests
+# ---------------------------------------------------------------------------
+
+
+class FakeFailingNotionService(FakeWritableNotionAssetRegisterService):
+    """Notion fake that fails on specific match values."""
+
+    def __init__(self, rows, *, fail_on: set[str] | None = None):
+        super().__init__(rows)
+        self.fail_on = fail_on or set()
+
+    def upsert_database_page(self, database_id, match_field, match_value, properties):
+        self.database_upserts.append((database_id, match_field, match_value, properties))
+        if match_value in self.fail_on:
+            return None
+        return "page_ok"
+
+
+class FakeNoDbNotionService(FakeWritableNotionAssetRegisterService):
+    """Notion fake where ensure_database always fails."""
+
+    def ensure_database(self, title, properties, parent_page_id=None):
+        self.database_ensures.append((title, properties, parent_page_id))
+        return None
+
+
+def _make_publishable_row(asset_name: str = "Test Site", **overrides):
+    row = {
+        "asset_name": asset_name,
+        "target_date": "2026-03-07",
+        "pac_date": "",
+        "pac_phase": "post_pac",
+        "pac_in_past": True,
+        "pac_date_missing": False,
+        "has_any_data": True,
+        "sources_with_data": "juggle",
+        "preferred_source": "juggle",
+        "checked_sources": "juggle",
+        "match_name": asset_name,
+        "match_method": "notion_override",
+        "match_confidence": 1.0,
+        "resolved_source_types": "juggle",
+        "resolution_notes": "",
+        "project_name": asset_name,
+        "customer_name": "Customer",
+        "spv": "",
+        "priority": "",
+        "site_address": "",
+        "am_contact_name": "",
+        "am_contact_email": "",
+        "notion_page_id": "",
+        "notion_url": "",
+        "juggle_identifier": "AMP:00001",
+        "juggle_status": "ok",
+        "juggle_has_data": True,
+        "juggle_sample_count": 96,
+        "juggle_message": "",
+        "findings": [],
+        "finding_types": [],
+        "actionable_finding_count": 0,
+        "highest_finding_severity": "",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_publish_daily_dataset_empty_dataset_publishes_nothing(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text("{}", encoding="utf-8")
+
+    notion = FakeWritableNotionAssetRegisterService([])
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={},
+    )
+
+    result = service.publish_daily_dataset_to_notion([], parent_page_id="page_id")
+    assert result["published"] == 0
+    assert result["failed"] == 0
+    assert len(notion.database_upserts) == 0
+
+
+def test_publish_daily_dataset_database_creation_failure_returns_all_failed(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text("{}", encoding="utf-8")
+
+    notion = FakeNoDbNotionService([])
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={},
+    )
+
+    rows = [_make_publishable_row("SiteA"), _make_publishable_row("SiteB")]
+    result = service.publish_daily_dataset_to_notion(rows, parent_page_id="page_id")
+    assert result["database_id"] is None
+    assert result["published"] == 0
+    assert result["failed"] == 2
+
+
+def test_publish_daily_dataset_partial_failure_counts_correctly(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text("{}", encoding="utf-8")
+
+    notion = FakeFailingNotionService([], fail_on={"SiteB"})
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={},
+    )
+
+    rows = [_make_publishable_row("SiteA"), _make_publishable_row("SiteB"), _make_publishable_row("SiteC")]
+    result = service.publish_daily_dataset_to_notion(rows, database_id="db_daily")
+    assert result["published"] == 2
+    assert result["failed"] == 1
+    assert result["eligible_rows"] == 3
+
+
+def test_publish_triage_database_creation_failure_returns_all_failed(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text("{}", encoding="utf-8")
+
+    notion = FakeNoDbNotionService([])
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(notion_page_id="parent"),
+        legacy_mapping_path=mapping_path,
+        checkers={},
+    )
+
+    records = [
+        {"row_key": "2026-03-07|SiteA|issue", "asset_name": "SiteA", "target_date": "2026-03-07",
+         "issue_type": "source_error", "severity": "high", "confidence": 0.9,
+         "source_coverage": "juggle", "evidence_summary": "API fail",
+         "recommended_action": "Fix creds", "email_subject": "Subj", "email_draft": "Body",
+         "am_contact_name": "", "am_contact_email": "", "project_name": "SiteA",
+         "customer_name": "C", "spv": "", "priority": "", "asset_register_url": "",
+         "preferred_source": "", "match_method": "", "has_any_data": False},
+    ]
+    result = service.publish_triage_records_to_notion(records)
+    assert result["database_id"] is None
+    assert result["published"] == 0
+    assert result["failed"] == 1
+
+
+def test_publish_triage_partial_failure_continues_remaining(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text("{}", encoding="utf-8")
+
+    notion = FakeFailingNotionService([], fail_on={"2026-03-07|SiteA|issue"})
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(notion_page_id="parent"),
+        legacy_mapping_path=mapping_path,
+        checkers={},
+    )
+
+    base = {"target_date": "2026-03-07", "issue_type": "source_error", "severity": "high",
+            "confidence": 0.9, "source_coverage": "juggle", "evidence_summary": "err",
+            "recommended_action": "Fix", "email_subject": "S", "email_draft": "B",
+            "am_contact_name": "", "am_contact_email": "", "project_name": "",
+            "customer_name": "", "spv": "", "priority": "", "asset_register_url": "",
+            "preferred_source": "", "match_method": "", "has_any_data": False}
+
+    records = [
+        {**base, "row_key": "2026-03-07|SiteA|issue", "asset_name": "SiteA"},
+        {**base, "row_key": "2026-03-07|SiteB|issue", "asset_name": "SiteB"},
+    ]
+    result = service.publish_triage_records_to_notion(records)
+    assert result["published"] == 1
+    assert result["failed"] == 1
+    assert len(notion.database_upserts) == 2
+
+
+def test_validate_dataset_rows_separates_valid_and_rejected() -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    rows = [
+        {"asset_name": "Good", "target_date": "2026-03-07", "match_method": "override"},
+        {"asset_name": "", "target_date": "2026-03-07", "match_method": "override"},
+        {"asset_name": "Missing Date", "target_date": "", "match_method": "override"},
+    ]
+    valid, rejected = AssetRegisterAuditService.validate_dataset_rows(
+        rows, AssetRegisterAuditService.DAILY_REQUIRED_FIELDS,
+    )
+    assert len(valid) == 1
+    assert valid[0]["asset_name"] == "Good"
+    assert len(rejected) == 2
+    assert "asset_name" in rejected[0]["_validation_missing_fields"]
+    assert "target_date" in rejected[1]["_validation_missing_fields"]
+
+
+def test_publish_daily_dataset_skips_invalid_rows(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text("{}", encoding="utf-8")
+
+    notion = FakeWritableNotionAssetRegisterService([])
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={},
+    )
+
+    rows = [
+        _make_publishable_row("ValidSite"),
+        {**_make_publishable_row("x"), "asset_name": ""},  # missing asset_name → rejected
+    ]
+    result = service.publish_daily_dataset_to_notion(rows, database_id="db_daily")
+    assert result["published"] == 1
+    assert result["failed"] == 0
+    assert result["eligible_rows"] == 1
+
+
+def test_enrich_dataset_with_rolling_trend_computes_mean_from_cached_days(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    ref = date(2026, 3, 10)
+
+    for offset in (1, 2, 3):
+        day = ref - timedelta(days=offset)
+        data = [
+            {
+                "asset_name": "SiteA",
+                "actual_daylight_kwh": 100.0 + offset * 10,
+                "availability_ratio": 0.9 + offset * 0.01,
+            },
+            {
+                "asset_name": "SiteB",
+                "actual_daylight_kwh": 200.0,
+                "availability_ratio": None,
+            },
+        ]
+        (tmp_path / f"asset_yesterday_dataset_{day.isoformat()}.json").write_text(
+            json.dumps(data), encoding="utf-8",
+        )
+
+    dataset = [
+        {"asset_name": "SiteA", "actual_daylight_kwh": 50.0},
+        {"asset_name": "SiteB", "actual_daylight_kwh": 150.0},
+        {"asset_name": "SiteC", "actual_daylight_kwh": None},
+    ]
+
+    result = AssetRegisterAuditService.enrich_dataset_with_rolling_trend(dataset, tmp_path, ref)
+
+    site_a = next(r for r in result if r["asset_name"] == "SiteA")
+    assert site_a["trend_days_available"] == 3
+    assert site_a["trend_gen_mean_kwh"] is not None
+    assert abs(site_a["trend_gen_mean_kwh"] - 120.0) < 0.01  # (110+120+130)/3
+    assert site_a["trend_availability_mean"] is not None
+
+    site_b = next(r for r in result if r["asset_name"] == "SiteB")
+    assert site_b["trend_days_available"] == 3
+    assert site_b["trend_gen_mean_kwh"] == 200.0
+    assert site_b["trend_availability_mean"] is None  # all None
+
+    site_c = next(r for r in result if r["asset_name"] == "SiteC")
+    assert site_c["trend_days_available"] == 0
+    assert site_c["trend_gen_mean_kwh"] is None
 
 
 @pytest.mark.asyncio
