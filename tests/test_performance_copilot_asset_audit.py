@@ -123,6 +123,22 @@ class FakeDaylightMetricsFetcher:
         return dict(self.target_metrics)
 
 
+class FakeCurtailmentFetcher:
+    def __init__(self, result: dict[str, object] | None = None) -> None:
+        self.result = result
+        self.calls: list[tuple[str, date, float | None, dict[str, object]]] = []
+
+    def get_day_curtailment(  # noqa: ANN001
+        self,
+        plant_uid: str,
+        target_date: date,
+        ppa_rate_gbp_mwh: float | None = None,
+        **kwargs,
+    ):
+        self.calls.append((plant_uid, target_date, ppa_rate_gbp_mwh, dict(kwargs)))
+        return None if self.result is None else dict(self.result)
+
+
 class FakePlantRepository:
     def __init__(self, rows: list[dict[str, object]]) -> None:
         self._rows = rows
@@ -738,7 +754,7 @@ async def test_build_yesterday_dataset_attaches_juggle_daylight_metrics(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_build_yesterday_dataset_includes_curtailment_generation_and_revenue_loss(tmp_path) -> None:
+async def test_build_yesterday_dataset_does_not_infer_curtailment_from_daylight_gap_without_export_limit_signal(tmp_path) -> None:
     from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
 
     mapping_path = tmp_path / "mapping.json"
@@ -782,6 +798,7 @@ async def test_build_yesterday_dataset_includes_curtailment_generation_and_reven
             "irradiance_message": "",
         }
     )
+    curtailment_fetcher = FakeCurtailmentFetcher(result=None)
 
     service = AssetRegisterAuditService(
         notion_service=notion,
@@ -790,14 +807,102 @@ async def test_build_yesterday_dataset_includes_curtailment_generation_and_reven
         checkers={"juggle": juggle_checker},
         supported_sources=("juggle",),
         daylight_metrics_fetcher=metrics_fetcher,
+        curtailment_fetcher=curtailment_fetcher,
     )
 
     dataset = await service.build_yesterday_dataset(reference_date=date(2026, 3, 8))
 
     row = dataset[0]
-    assert row["curtailment_event_type"] == "curtailment_candidate"
-    assert row["curtailment_generation_loss_kwh"] == pytest.approx(20.0)
-    assert row["curtailment_revenue_loss_gbp"] == pytest.approx(1.7)
+    assert row["curtailment_event_type"] == ""
+    assert row["curtailment_generation_loss_kwh"] is None
+    assert row["curtailment_revenue_loss_gbp"] is None
+    assert curtailment_fetcher.calls == [
+        (
+            "ERS:00001",
+            date(2026, 3, 7),
+            85.0,
+            {
+                "asset_name": "Newfold Farm",
+                "match_name": "Newfold Farm",
+                "preferred_source": "juggle",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_yesterday_dataset_populates_curtailment_from_export_limit_summary(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text(
+        """
+        {
+          "Newfold Farm": {
+            "platform": "juggle",
+            "site_id": "",
+            "juggle_uid": "ERS:00001"
+          }
+        }
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    notion = FakeNotionAssetRegisterService(
+        [
+            {
+                "Alias": "Newfold Farm",
+                "PAC Date": "2026-03-01",
+                "PPA Rate (GBP/MWh)": "85",
+                "TIC kWp": 500,
+            }
+        ]
+    )
+    juggle_checker = FakeChecker("juggle", has_data=True)
+    metrics_fetcher = FakeDaylightMetricsFetcher(
+        metrics={
+            "capacity_kwp": 500.0,
+            "irradiance_source": "juggle_weather_station",
+            "irradiance_device_id": "WETH:000274",
+            "irradiance_threshold_wm2": 75.0,
+            "daylight_hh_periods": 20,
+            "available_hh_periods": 18,
+            "availability_ratio": 0.9,
+            "actual_daylight_kwh": 100.0,
+            "expected_daylight_kwh": 120.0,
+            "h_poa_daylight_kwh_m2": 0.3,
+            "performance_ratio": 0.8333333333,
+            "irradiance_message": "",
+        }
+    )
+    curtailment_fetcher = FakeCurtailmentFetcher(
+        result={
+            "curtailment_event_type": "export_limit_curtailment",
+            "curtailment_generation_loss_kwh": 12.5,
+            "curtailment_revenue_loss_gbp": 1.0625,
+            "curtailment_confidence": 0.95,
+            "curtailment_message": "Detected from export-limit telemetry with 8 curtailed intervals.",
+        }
+    )
+
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={"juggle": juggle_checker},
+        supported_sources=("juggle",),
+        daylight_metrics_fetcher=metrics_fetcher,
+        curtailment_fetcher=curtailment_fetcher,
+    )
+
+    dataset = await service.build_yesterday_dataset(reference_date=date(2026, 3, 8))
+
+    row = dataset[0]
+    assert row["curtailment_event_type"] == "export_limit_curtailment"
+    assert row["curtailment_generation_loss_kwh"] == pytest.approx(12.5)
+    assert row["curtailment_revenue_loss_gbp"] == pytest.approx(1.0625)
+    assert row["curtailment_confidence"] == pytest.approx(0.95)
+    assert row["curtailment_message"] == "Detected from export-limit telemetry with 8 curtailed intervals."
 
 
 @pytest.mark.asyncio

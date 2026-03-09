@@ -319,6 +319,17 @@ class DailyDataChecker(Protocol):
         ...
 
 
+class CurtailmentFetcher(Protocol):
+    def get_day_curtailment(
+        self,
+        plant_uid: str,
+        target_date: date,
+        ppa_rate_gbp_mwh: float | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any] | None:
+        ...
+
+
 @dataclass(slots=True)
 class SourceCheckResult:
     source: str
@@ -346,6 +357,67 @@ class TriageAssessment:
     confidence: float
     recommended_action: str
     issue_summary: str
+
+
+class ExportLimitCurtailmentFetcher:
+    def __init__(self, curtailment_engine: Any | None = None) -> None:
+        if curtailment_engine is None:
+            from solar_platform.analysis.curtailment import CurtailmentEngine
+
+            curtailment_engine = CurtailmentEngine()
+        self.curtailment_engine = curtailment_engine
+
+    def get_day_curtailment(
+        self,
+        plant_uid: str,
+        target_date: date,
+        ppa_rate_gbp_mwh: float | None = None,
+        **kwargs: Any,  # noqa: ARG002
+    ) -> dict[str, Any] | None:
+        start = datetime.combine(target_date, time.min, tzinfo=UTC)
+        end = start + timedelta(days=1)
+        try:
+            result = self.curtailment_engine.run(plant_uid, start, end)
+        except Exception:
+            logger.exception(
+                "curtailment_fetch_failed",
+                extra={"plant_uid": plant_uid, "target_date": target_date.isoformat()},
+            )
+            return None
+
+        summary = getattr(result, "summary", None)
+        if not isinstance(summary, dict):
+            return None
+
+        detection_method = str(summary.get("detection_method", "")).strip()
+        curtailed_records = int(summary.get("curtailed_records") or 0)
+        generation_loss_kwh = _coerce_float(summary.get("curtailed_energy_kwh"))
+        if (
+            detection_method != "export_limit"
+            or curtailed_records <= 0
+            or generation_loss_kwh is None
+            or generation_loss_kwh <= 0
+        ):
+            return None
+
+        ppa_rate = _coerce_float(ppa_rate_gbp_mwh)
+        revenue_loss_gbp = (generation_loss_kwh / 1000.0) * ppa_rate if ppa_rate is not None else None
+        curtailment_rate_pct = _coerce_float(summary.get("curtailment_rate_pct"))
+        rate_fragment = (
+            f" Curtailed coverage was {curtailment_rate_pct:.2f}%."
+            if curtailment_rate_pct is not None
+            else ""
+        )
+        return {
+            "curtailment_event_type": "export_limit_curtailment",
+            "curtailment_generation_loss_kwh": generation_loss_kwh,
+            "curtailment_revenue_loss_gbp": revenue_loss_gbp,
+            "curtailment_confidence": 0.95,
+            "curtailment_message": (
+                f"Detected from export-limit telemetry with {curtailed_records} curtailed intervals."
+                f"{rate_fragment}"
+            ),
+        }
 
 
 def _normalise_key(value: Any) -> str:
@@ -1823,6 +1895,7 @@ class AssetRegisterAuditService:
         supported_sources: tuple[str, ...] = SUPPORTED_SOURCES,
         daylight_metrics_fetcher: Any | None = None,
         juggle_daylight_metrics_fetcher: Any | None = None,
+        curtailment_fetcher: CurtailmentFetcher | Any | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.notion_service = notion_service or NotionAssetRegisterService(settings=self.settings)
@@ -1834,6 +1907,7 @@ class AssetRegisterAuditService:
             or juggle_daylight_metrics_fetcher
             or RepositoryDaylightMetricsFetcher()
         )
+        self.curtailment_fetcher = curtailment_fetcher or ExportLimitCurtailmentFetcher()
 
     @staticmethod
     def confirmed_data_source_matches() -> dict[str, str]:
@@ -2771,28 +2845,28 @@ class AssetRegisterAuditService:
                 if isinstance(metrics, dict):
                     row.update(metrics)
 
-            expected_daylight_kwh = _coerce_float(row.get("expected_daylight_kwh"))
-            actual_daylight_kwh = _coerce_float(row.get("actual_daylight_kwh"))
-            ppa_rate = _coerce_float(row.get("ppa_rate_gbp_mwh"))
-            if (
-                row.get("has_any_data")
-                and expected_daylight_kwh is not None
-                and actual_daylight_kwh is not None
-                and expected_daylight_kwh > actual_daylight_kwh
-            ):
-                generation_loss_kwh = expected_daylight_kwh - actual_daylight_kwh
-                row["curtailment_event_type"] = "curtailment_candidate"
-                row["curtailment_generation_loss_kwh"] = generation_loss_kwh
-                row["curtailment_revenue_loss_gbp"] = (
-                    (generation_loss_kwh / 1000.0) * ppa_rate
-                    if ppa_rate is not None
-                    else None
-                )
-                row["curtailment_confidence"] = 0.6
-                row["curtailment_message"] = (
-                    "Estimated from daylight expected-vs-actual generation gap; "
-                    "controller state is not confirmed in the daily asset audit."
-                )
+            if row.get("has_any_data") and self.curtailment_fetcher is not None:
+                plant_uid = identifiers.get("juggle", "")
+                if plant_uid:
+                    curtailment = self.curtailment_fetcher.get_day_curtailment(
+                        plant_uid,
+                        target_date,
+                        ppa_rate_gbp_mwh=_coerce_float(row.get("ppa_rate_gbp_mwh")),
+                        asset_name=asset_name,
+                        match_name=resolution.match_name,
+                        preferred_source=row.get("preferred_source", ""),
+                    )
+                    if inspect.isawaitable(curtailment):
+                        curtailment = await curtailment
+                    if isinstance(curtailment, dict):
+                        for key in (
+                            "curtailment_event_type",
+                            "curtailment_generation_loss_kwh",
+                            "curtailment_revenue_loss_gbp",
+                            "curtailment_confidence",
+                            "curtailment_message",
+                        ):
+                            row[key] = curtailment.get(key, row.get(key))
             findings = self._build_findings_for_row(
                 row=row,
                 identifiers=identifiers,
