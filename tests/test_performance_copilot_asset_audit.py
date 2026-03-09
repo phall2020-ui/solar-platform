@@ -2550,6 +2550,100 @@ def test_publish_daily_dataset_to_notion_republishes_same_site_as_single_upsert_
 
 
 @pytest.mark.asyncio
+async def test_run_asset_register_daily_publish_reuses_cached_dataset(tmp_path, monkeypatch) -> None:
+    from solar_platform.services import performance_copilot_asset_audit as audit_module
+
+    target_date = date(2025, 12, 2)
+    dataset = [
+        {
+            "asset_name": "Hibernian Stadium",
+            "target_date": target_date.isoformat(),
+            "pac_phase": "post_pac",
+            "has_any_data": True,
+            "findings": [],
+        }
+    ]
+    (tmp_path / f"asset_yesterday_dataset_{target_date.isoformat()}.json").write_text(
+        json.dumps(dataset),
+        encoding="utf-8",
+    )
+
+    async def _unexpected_build(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("build_yesterday_dataset should not be called when cached output exists")
+
+    monkeypatch.setattr(audit_module.AssetRegisterAuditService, "build_yesterday_dataset", _unexpected_build)
+    monkeypatch.setattr(
+        audit_module.AssetRegisterAuditService,
+        "publish_daily_dataset_to_notion",
+        lambda self, rows, **kwargs: {"published": len(rows), "database_id": "db_daily"},
+    )
+
+    result = await audit_module.run_asset_register_daily_publish(
+        output_dir=tmp_path,
+        reference_date=target_date + timedelta(days=1),
+        database_id="db_daily",
+    )
+
+    assert result["rows"] == 1
+    assert result["publish_result"]["published"] == 1
+    assert json.loads((tmp_path / f"asset_daily_records_{target_date.isoformat()}.json").read_text(encoding="utf-8")) == dataset
+
+
+@pytest.mark.asyncio
+async def test_run_asset_register_triage_publish_reuses_cached_dataset(tmp_path, monkeypatch) -> None:
+    from solar_platform.services import performance_copilot_asset_audit as audit_module
+
+    target_date = date(2025, 12, 2)
+    dataset = [
+        {
+            "asset_name": "Finlay Beverages",
+            "target_date": target_date.isoformat(),
+            "pac_phase": "post_pac",
+            "project_name": "Finlay Beverages",
+            "customer_name": "Finlay",
+            "spv": "",
+            "priority": "",
+            "site_address": "",
+            "am_contact_name": "",
+            "am_contact_email": "",
+            "findings": [
+                {
+                    "finding_type": "inverter_meter_comparison",
+                    "severity": "high",
+                    "confidence": 0.9,
+                    "summary": "Meter and inverter totals diverged materially.",
+                    "recommended_action": "Investigate the discrepancy.",
+                }
+            ],
+        }
+    ]
+    (tmp_path / f"asset_yesterday_dataset_{target_date.isoformat()}.json").write_text(
+        json.dumps(dataset),
+        encoding="utf-8",
+    )
+
+    async def _unexpected_build(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("build_yesterday_dataset should not be called when cached output exists")
+
+    monkeypatch.setattr(audit_module.AssetRegisterAuditService, "build_yesterday_dataset", _unexpected_build)
+    monkeypatch.setattr(
+        audit_module.AssetRegisterAuditService,
+        "publish_triage_records_to_notion",
+        lambda self, rows: {"published": len(rows), "database_id": "db_triage"},
+    )
+
+    result = await audit_module.run_asset_register_triage_publish(
+        output_dir=tmp_path,
+        reference_date=target_date + timedelta(days=1),
+    )
+
+    triage_records = json.loads((tmp_path / f"asset_triage_records_{target_date.isoformat()}.json").read_text(encoding="utf-8"))
+    assert result["rows"] == 1
+    assert result["publish_result"]["published"] == 1
+    assert triage_records[0]["finding_type"] == "inverter_meter_comparison"
+
+
+@pytest.mark.asyncio
 async def test_solaredge_daily_checker_uses_site_specific_keys_json(monkeypatch) -> None:
     from solar_platform.services.performance_copilot_asset_audit import SolarEdgeDailyChecker
 

@@ -3174,7 +3174,14 @@ class AssetRegisterAuditService:
             force_refresh=force_refresh,
             asset_filter=asset_filter,
         )
+        return self._build_triage_records_from_dataset(dataset, include_healthy=include_healthy)
 
+    def _build_triage_records_from_dataset(
+        self,
+        dataset: list[dict[str, Any]],
+        *,
+        include_healthy: bool = False,
+    ) -> list[dict[str, Any]]:
         triage_records: list[dict[str, Any]] = []
         for row in dataset:
             if row.get("pac_phase") != "post_pac":
@@ -3468,6 +3475,23 @@ async def run_asset_register_yesterday_audit(
     }
 
 
+def _resolve_audit_target_date(reference_date: date | None) -> date:
+    return (reference_date or datetime.now(UTC).date()) - timedelta(days=1)
+
+
+def _load_cached_audit_dataset(output_dir: Path, target_date: date) -> list[dict[str, Any]] | None:
+    dataset_path = output_dir / f"asset_yesterday_dataset_{target_date.isoformat()}.json"
+    if not dataset_path.exists():
+        return None
+    try:
+        raw = json.loads(dataset_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, list):
+        return None
+    return [row for row in raw if isinstance(row, dict)]
+
+
 async def run_asset_register_triage_publish(
     output_dir: Path,
     reference_date: date | None = None,
@@ -3476,13 +3500,15 @@ async def run_asset_register_triage_publish(
     include_healthy: bool = False,
 ) -> dict[str, Any]:
     service = AssetRegisterAuditService()
-    triage_records = await service.build_triage_records(
-        reference_date=reference_date,
-        force_refresh=force_refresh,
-        asset_filter=asset_filter,
-        include_healthy=include_healthy,
-    )
-    target_date = (reference_date or datetime.now(UTC).date()) - timedelta(days=1)
+    target_date = _resolve_audit_target_date(reference_date)
+    dataset = _load_cached_audit_dataset(output_dir, target_date)
+    if dataset is None:
+        dataset = await service.build_yesterday_dataset(
+            reference_date=reference_date,
+            force_refresh=force_refresh,
+            asset_filter=asset_filter,
+        )
+    triage_records = service._build_triage_records_from_dataset(dataset, include_healthy=include_healthy)
     output_dir.mkdir(parents=True, exist_ok=True)
     triage_json_path = output_dir / f"asset_triage_records_{target_date.isoformat()}.json"
     triage_json_path.write_text(json.dumps(triage_records, indent=2), encoding="utf-8")
@@ -3507,12 +3533,14 @@ async def run_asset_register_daily_publish(
     parent_page_id: str | None = None,
 ) -> dict[str, Any]:
     service = AssetRegisterAuditService()
-    dataset = await service.build_yesterday_dataset(
-        reference_date=reference_date,
-        force_refresh=force_refresh,
-        asset_filter=asset_filter,
-    )
-    target_date = (reference_date or datetime.now(UTC).date()) - timedelta(days=1)
+    target_date = _resolve_audit_target_date(reference_date)
+    dataset = _load_cached_audit_dataset(output_dir, target_date)
+    if dataset is None:
+        dataset = await service.build_yesterday_dataset(
+            reference_date=reference_date,
+            force_refresh=force_refresh,
+            asset_filter=asset_filter,
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
     daily_json_path = output_dir / f"asset_daily_records_{target_date.isoformat()}.json"
     daily_json_path.write_text(json.dumps(dataset, indent=2), encoding="utf-8")
