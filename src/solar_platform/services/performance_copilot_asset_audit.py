@@ -159,6 +159,8 @@ DAILY_JSON_DATABASE_TITLE = "Daily JSON"
 STARK_DAILY_DATABASE_TITLE = "Stark HH Daily Data"
 STARK_FUSION_VARIANCE_THRESHOLD_PCT = 8.0
 INVERTER_METER_ALERT_CRITICAL_PCT = 5.0
+DEFAULT_PPA_RATE_GBP_MWH = 100.0
+DEFAULT_PPA_RATE_SOURCE = "Backstop (10p/kWh)"
 SEVERITY_RANK: dict[str, int] = {
     "info": 0,
     "low": 1,
@@ -452,7 +454,7 @@ def _extract_capacity_kwp(row: dict[str, Any]) -> float | None:
 def _extract_ppa_rate_gbp_mwh(row: dict[str, Any]) -> tuple[float | None, str]:
     field_name, raw_value = _get_candidate_and_value(row, PPA_RATE_FIELD_CANDIDATES)
     if raw_value in (None, "", [], {}):
-        return None, ""
+        return DEFAULT_PPA_RATE_GBP_MWH, DEFAULT_PPA_RATE_SOURCE
 
     raw_text = str(raw_value).strip()
     numeric_text = (
@@ -472,7 +474,7 @@ def _extract_ppa_rate_gbp_mwh(row: dict[str, Any]) -> tuple[float | None, str]:
     )
     numeric_value = _coerce_float(numeric_text)
     if numeric_value is None:
-        return None, field_name
+        return DEFAULT_PPA_RATE_GBP_MWH, DEFAULT_PPA_RATE_SOURCE
 
     field_key = _normalise_key(field_name)
     value_key = _normalise_key(raw_text)
@@ -1416,10 +1418,6 @@ class RepositoryDaylightMetricsFetcher:
 
         rate = _coerce_float(ppa_rate_gbp_mwh)
         if rate is None:
-            if metrics["target_revenue_message"]:
-                metrics["target_revenue_message"] += " | Missing PPA rate in asset register."
-            else:
-                metrics["target_revenue_message"] = "Missing PPA rate in asset register."
             return metrics
 
         if yesterday_gen is not None:
@@ -2719,8 +2717,16 @@ class AssetRegisterAuditService:
                     )
                     if inspect.isawaitable(target_metrics):
                         target_metrics = await target_metrics
-                    if isinstance(target_metrics, dict):
-                        row.update(target_metrics)
+                if isinstance(target_metrics, dict):
+                    row.update(target_metrics)
+                    if ppa_rate_source == DEFAULT_PPA_RATE_SOURCE:
+                        existing_message = str(row.get("target_revenue_message", "")).strip()
+                        fallback_message = f"Using {DEFAULT_PPA_RATE_SOURCE} because the asset register PPA rate is missing or invalid."
+                        row["target_revenue_message"] = (
+                            f"{existing_message} | {fallback_message}"
+                            if existing_message
+                            else fallback_message
+                        )
 
             sources_with_data: list[str] = []
             for source in self.supported_sources:

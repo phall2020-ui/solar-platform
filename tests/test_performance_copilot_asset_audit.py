@@ -306,6 +306,60 @@ async def test_build_yesterday_dataset_normalises_ppa_rate_to_gbp_per_mwh(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_build_yesterday_dataset_uses_backstop_ppa_rate_when_missing(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    class RevenueEchoFetcher(FakeDaylightMetricsFetcher):
+        async def get_target_metrics(self, **kwargs):  # noqa: ANN003
+            self.target_calls.append(dict(kwargs))
+            rate = kwargs["ppa_rate_gbp_mwh"]
+            return {
+                "target_gen_yesterday_kwh": 10.0,
+                "target_revenue_yesterday_gbp": (10.0 / 1000.0) * rate,
+                "target_weather_yesterday": "archive",
+                "target_gen_today_kwh": 12.0,
+                "target_revenue_today_gbp": (12.0 / 1000.0) * rate,
+                "target_weather_today": "forecast",
+                "target_gen_week_kwh": 70.0,
+                "target_revenue_week_gbp": (70.0 / 1000.0) * rate,
+                "target_weather_week": "archive+forecast",
+                "target_revenue_message": "",
+            }
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text("{}", encoding="utf-8")
+
+    notion = FakeNotionAssetRegisterService(
+        [
+            {
+                "Alias": "Finlay Beverages",
+                "PAC Date": "2026-03-01",
+                "TIC kWp": "500",
+            },
+        ]
+    )
+
+    fetcher = RevenueEchoFetcher()
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={"juggle": FakeChecker("juggle", has_data=False, status="no_data")},
+        daylight_metrics_fetcher=fetcher,
+    )
+
+    dataset = await service.build_yesterday_dataset(reference_date=date(2026, 3, 8))
+    row = dataset[0]
+
+    assert row["ppa_rate_gbp_mwh"] == pytest.approx(100.0)
+    assert row["ppa_rate_source"] == "Backstop (10p/kWh)"
+    assert row["target_revenue_yesterday_gbp"] == pytest.approx(1.0)
+    assert row["target_revenue_today_gbp"] == pytest.approx(1.2)
+    assert row["target_revenue_week_gbp"] == pytest.approx(7.0)
+    assert "Using Backstop (10p/kWh)" in row["target_revenue_message"]
+
+
+@pytest.mark.asyncio
 async def test_repository_daylight_metrics_fetcher_builds_target_generation_and_revenue() -> None:
     from solar_platform.services.performance_copilot_asset_audit import RepositoryDaylightMetricsFetcher
 
