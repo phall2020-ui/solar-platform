@@ -13,17 +13,6 @@ on:
         default: ""
   schedule:
     - cron: "0 4 * * *"
-  push:
-    branches:
-      - "**"
-    paths:
-      - ".github/workflows/copilot_asset_audit.yml"
-      - "tools/performance-intelligence-copilot/**"
-      - "src/solar_platform/services/performance_copilot_asset_audit.py"
-      - "src/solar_platform/integrations/notion_assets.py"
-      - "src/solar_platform/integrations/2026-02-15-Integrations-File-Notion-Assets-v01.py"
-      - "tests/test_performance_copilot_asset_audit.py"
-      - "tests/2026-02-15-Tests-File-Test-Notion-Asset-Register-Service-v01.py"
 
 concurrency:
   group: copilot-asset-audit-${{ github.ref }}
