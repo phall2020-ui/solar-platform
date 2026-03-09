@@ -3234,9 +3234,10 @@ class AssetRegisterAuditService:
         published = 0
         failed = 0
         for row in rows_to_publish:
+            asset_name = str(row.get("asset_name", "")).strip()
             row_key = f"{row.get('target_date', '')}|{row.get('asset_name', '')}"
             properties = {
-                "Asset": _title_property(row.get("asset_name")),
+                "Asset": _title_property(asset_name),
                 "Row Key": _text_property(row_key),
                 "Target Date": _date_property(row.get("target_date")),
                 "PAC Date": _date_property(row.get("pac_date")),
@@ -3331,19 +3332,12 @@ class AssetRegisterAuditService:
                 "SMA Message": _text_property(row.get("sma_message")),
                 "Daily JSON": _text_property(json.dumps(row, sort_keys=True)),
             }
-            create_page = getattr(self.notion_service, "create_database_page", None)
-            if callable(create_page):
-                page_id = create_page(
-                    database_id=target_database_id,
-                    properties=properties,
-                )
-            else:
-                page_id = self.notion_service.upsert_database_page(
-                    database_id=target_database_id,
-                    match_field="Row Key",
-                    match_value=row_key,
-                    properties=properties,
-                )
+            page_id = self.notion_service.upsert_database_page(
+                database_id=target_database_id,
+                match_field="Asset",
+                match_value=asset_name or row_key,
+                properties=properties,
+            )
             if page_id:
                 published += 1
             else:

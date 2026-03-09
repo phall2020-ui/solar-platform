@@ -2142,7 +2142,7 @@ async def test_publish_triage_records_to_notion_ensures_database_and_upserts_row
     assert properties["AM Email Draft"] == {"rich_text": [{"text": {"content": "Draft body"}}]}
 
 
-def test_publish_daily_dataset_to_notion_uses_parent_page_and_appends_rows(tmp_path) -> None:
+def test_publish_daily_dataset_to_notion_uses_parent_page_and_upserts_single_site_rows(tmp_path) -> None:
     from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
 
     mapping_path = tmp_path / "mapping.json"
@@ -2325,10 +2325,12 @@ def test_publish_daily_dataset_to_notion_uses_parent_page_and_appends_rows(tmp_p
     assert notion.database_ensures[0][0] == "Daily JSON"
     assert notion.database_ensures[0][2] == "page_daily_json"
     assert notion.database_property_ensures[0][0] == "db_triage"
-    assert notion.database_upserts == []
-    assert len(notion.database_creates) == 1
-    database_id, properties = notion.database_creates[0]
+    assert notion.database_creates == []
+    assert len(notion.database_upserts) == 1
+    database_id, match_field, match_value, properties = notion.database_upserts[0]
     assert database_id == "db_triage"
+    assert match_field == "Asset"
+    assert match_value == "Cromwell Tools"
     assert properties["Row Key"] == {"rich_text": [{"text": {"content": "2026-03-07|Cromwell Tools"}}]}
     assert properties["PAC Date"] == {"date": None}
     assert properties["PAC Phase"] == {"rich_text": [{"text": {"content": "unknown"}}]}
@@ -2451,14 +2453,16 @@ def test_publish_daily_dataset_to_notion_includes_rows_with_findings_even_withou
 
     assert result["eligible_rows"] == 1
     assert result["published"] == 1
-    assert len(notion.database_creates) == 1
-    _, properties = notion.database_creates[0]
+    assert len(notion.database_upserts) == 1
+    _, match_field, match_value, properties = notion.database_upserts[0]
+    assert match_field == "Asset"
+    assert match_value == "Hibernian Stadium"
     daily_json = properties["Daily JSON"]["rich_text"][0]["text"]["content"]
     assert "\"finding_type\": \"missing_identifier\"" in daily_json
     assert properties["Has Any Data"] == {"checkbox": False}
 
 
-def test_publish_daily_dataset_to_notion_republishes_same_row_key_as_new_row(tmp_path) -> None:
+def test_publish_daily_dataset_to_notion_republishes_same_site_as_single_upsert_target(tmp_path) -> None:
     from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
 
     mapping_path = tmp_path / "mapping.json"
@@ -2513,9 +2517,11 @@ def test_publish_daily_dataset_to_notion_republishes_same_row_key_as_new_row(tmp
 
     assert first["published"] == 1
     assert second["published"] == 1
-    assert notion.database_upserts == []
-    assert len(notion.database_creates) == 2
-    assert notion.database_creates[0][1]["Row Key"] == notion.database_creates[1][1]["Row Key"]
+    assert notion.database_creates == []
+    assert len(notion.database_upserts) == 2
+    assert notion.database_upserts[0][1:3] == ("Asset", "Cromwell Tools")
+    assert notion.database_upserts[1][1:3] == ("Asset", "Cromwell Tools")
+    assert notion.database_upserts[0][3]["Row Key"] == notion.database_upserts[1][3]["Row Key"]
 
 
 @pytest.mark.asyncio
