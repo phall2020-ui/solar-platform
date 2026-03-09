@@ -1076,6 +1076,31 @@ def test_export_limit_curtailment_fetcher_prefers_live_api_signal_when_available
     }
 
 
+def test_export_limit_curtailment_fetcher_skips_legacy_engine_when_toolkit_db_missing(monkeypatch, tmp_path) -> None:
+    from solar_platform.services import performance_copilot_asset_audit as audit_module
+
+    monkeypatch.setattr(
+        audit_module,
+        "get_settings",
+        lambda: SimpleNamespace(db_path=tmp_path / "missing" / "plant_registry.duckdb"),
+    )
+
+    fetcher = audit_module.ExportLimitCurtailmentFetcher(
+        curtailment_engine=None,
+        export_limit_history_dir=tmp_path / "missing-export-limits",
+    )
+
+    result = fetcher.get_day_curtailment(
+        "AMP:00029",
+        date(2025, 12, 2),
+        ppa_rate_gbp_mwh=100.0,
+        expected_daylight_kwh=90.0,
+        actual_daylight_kwh=50.0,
+    )
+
+    assert result is None
+
+
 @pytest.mark.asyncio
 async def test_repository_daylight_metrics_fetcher_uses_repo_poa_and_any_kwh_availability() -> None:
     from solar_platform.ingestion.base import Reading, ReadingBatch, ReadingQuality

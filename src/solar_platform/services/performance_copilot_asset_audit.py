@@ -372,17 +372,31 @@ class ExportLimitCurtailmentFetcher:
         curtailment_engine: Any | None = None,
         export_limit_history_dir: Path | None = None,
     ) -> None:
-        if curtailment_engine is None:
-            from solar_platform.analysis.curtailment import CurtailmentEngine
-
-            curtailment_engine = CurtailmentEngine()
         self.curtailment_engine = curtailment_engine
         self.export_limit_history_dir = export_limit_history_dir or self._default_export_limit_history_dir()
         self._export_limit_history_cache: pd.DataFrame | None = None
+        self._curtailment_engine_db_available: bool | None = None
 
     @staticmethod
     def _default_export_limit_history_dir() -> Path:
         return Path(__file__).resolve().parents[3] / "platform" / "data" / "export_limits"
+
+    def _curtailment_engine_is_available(self) -> bool:
+        if self.curtailment_engine is not None:
+            return True
+        if self._curtailment_engine_db_available is None:
+            self._curtailment_engine_db_available = get_settings().db_path.exists()
+        return self._curtailment_engine_db_available
+
+    def _get_curtailment_engine(self) -> Any | None:
+        if self.curtailment_engine is not None:
+            return self.curtailment_engine
+        if not self._curtailment_engine_is_available():
+            return None
+        from solar_platform.analysis.curtailment import CurtailmentEngine
+
+        self.curtailment_engine = CurtailmentEngine()
+        return self.curtailment_engine
 
     @staticmethod
     def _juggle_api_key() -> str:
@@ -643,8 +657,11 @@ class ExportLimitCurtailmentFetcher:
 
         start = datetime.combine(target_date, time.min, tzinfo=UTC)
         end = start + timedelta(days=1)
+        curtailment_engine = self._get_curtailment_engine()
+        if curtailment_engine is None:
+            return None
         try:
-            result = self.curtailment_engine.run(plant_uid, start, end)
+            result = curtailment_engine.run(plant_uid, start, end)
         except Exception:
             logger.exception(
                 "curtailment_fetch_failed",
