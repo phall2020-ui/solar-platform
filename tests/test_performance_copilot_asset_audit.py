@@ -1830,6 +1830,41 @@ async def test_build_yesterday_dataset_prefers_notion_override_before_fuzzy_matc
 
 
 @pytest.mark.asyncio
+async def test_build_yesterday_dataset_resolves_known_limitation_override_to_juggle_uid(tmp_path) -> None:
+    from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
+
+    mapping_path = tmp_path / "mapping.json"
+    mapping_path.write_text("{}", encoding="utf-8")
+
+    notion = FakeNotionAssetRegisterService(
+        [
+            {
+                "Alias": "Smithy's Mushrooms (Ph1)",
+                "PAC Date": "2025-01-01",
+                "Data Source Match": "Smithy's Mushrooms PH1",
+            },
+        ]
+    )
+
+    service = AssetRegisterAuditService(
+        notion_service=notion,
+        settings=SimpleNamespace(),
+        legacy_mapping_path=mapping_path,
+        checkers={"juggle": FakeChecker("juggle", has_data=False, status="no_data")},
+        supported_sources=("juggle",),
+        daylight_metrics_fetcher=FakeDaylightMetricsFetcher(),
+        curtailment_fetcher=FakeCurtailmentFetcher(),
+    )
+
+    dataset = await service.build_yesterday_dataset(reference_date=date(2025, 12, 3))
+
+    row = dataset[0]
+    assert row["match_name"] == "Smithy's Mushrooms PH1"
+    assert row["match_method"] == "notion_override"
+    assert row["juggle_identifier"] == "AMP:00028"
+
+
+@pytest.mark.asyncio
 async def test_build_yesterday_dataset_uses_builtin_confirmed_registry_when_file_missing(tmp_path) -> None:
     from solar_platform.services.performance_copilot_asset_audit import AssetRegisterAuditService
 

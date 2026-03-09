@@ -127,6 +127,11 @@ DEFAULT_CONFIRMED_SOURCE_REGISTRY: dict[str, dict[str, str]] = {
         "site_id": "1298491919450070492",
         "juggle_uid": "AMP:00031",
     },
+    "Smithy's Mushrooms PH1": {"platform": "juggle", "site_id": "", "juggle_uid": "AMP:00028"},
+    "Smithy's Mushrooms PH2": {"platform": "juggle", "site_id": "", "juggle_uid": "AMP:00033"},
+    "Sofina Foods": {"platform": "juggle", "site_id": "", "juggle_uid": "AMP:00029"},
+    "Casepak (Sunningdale Road)": {"platform": "juggle", "site_id": "", "juggle_uid": "HARP:00024"},
+    "Man City FC Training Ground": {"platform": "juggle", "site_id": "", "juggle_uid": "AMP:00019"},
     "Blachford UK": {
         "platform": "solaredge",
         "site_id": "4466155",
