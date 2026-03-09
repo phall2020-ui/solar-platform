@@ -2536,6 +2536,13 @@ def test_publish_daily_dataset_to_notion_uses_parent_page_and_upserts_single_sit
     assert properties["Target Weather Week"] == {
         "rich_text": [{"text": {"content": "archive+forecast"}}]
     }
+    assert properties["Finding Types"] == {
+        "rich_text": [{"text": {"content": "inverter_meter_comparison"}}]
+    }
+    assert properties["Actionable Finding Count"] == {"number": 1.0}
+    assert properties["Highest Finding Severity"] == {
+        "rich_text": [{"text": {"content": "high"}}]
+    }
     assert properties["Inverter Count"] == {"number": 2.0}
     assert properties["Inverters Reporting"] == {"number": 1.0}
     assert properties["Best Inverter Availability (%)"] == {"number": 1.0}
@@ -2635,6 +2642,13 @@ def test_publish_daily_dataset_to_notion_includes_rows_with_findings_even_withou
     daily_json = properties["Daily JSON"]["rich_text"][0]["text"]["content"]
     assert "\"finding_type\": \"missing_identifier\"" in daily_json
     assert properties["Has Any Data"] == {"checkbox": False}
+    assert properties["Finding Types"] == {
+        "rich_text": [{"text": {"content": "missing_identifier"}}]
+    }
+    assert properties["Actionable Finding Count"] == {"number": 1.0}
+    assert properties["Highest Finding Severity"] == {
+        "rich_text": [{"text": {"content": "medium"}}]
+    }
 
 
 def test_publish_daily_dataset_to_notion_republishes_same_site_as_single_upsert_target(tmp_path) -> None:
