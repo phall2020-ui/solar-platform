@@ -1,4 +1,4 @@
-from .open_meteo import OpenMeteoArchiveClient, OpenMeteoClient, HourlyWeatherRecord
+from .open_meteo import OpenMeteoClient, HourlyWeatherRecord
 from .nasa_power import NasaPowerClient, DailyHistoricalRecord
 from .storage import WeatherRepository
 from .forecast import WeatherBasedForecaster, WeatherForecastPoint
@@ -8,7 +8,6 @@ from .fleet_accuracy import FleetAccuracyService, FleetAccuracySummary
 
 __all__ = [
     "OpenMeteoClient",
-    "OpenMeteoArchiveClient",
     "HourlyWeatherRecord",
     "NasaPowerClient",
     "DailyHistoricalRecord",

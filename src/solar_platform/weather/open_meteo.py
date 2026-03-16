@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import date, datetime
-import time
+from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 import httpx
 
 BASE_URL = "https://api.open-meteo.com/v1/forecast"
-ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 DEFAULT_MODEL = "ukmo_seamless"
 DEFAULT_DAYS = 7
 
@@ -188,82 +186,3 @@ class OpenMeteoClient:
     ) -> dict[str, list[HourlyWeatherRecord]]:
         """Synchronous wrapper around batch_forecast."""
         return asyncio.run(self.batch_forecast(sites))
-
-
-class OpenMeteoArchiveClient:
-    def __init__(
-        self,
-        timeout: float = 30.0,
-        max_attempts: int = 2,
-        retry_backoff_seconds: float = 1.0,
-    ) -> None:
-        self.timeout = timeout
-        self.max_attempts = max(1, int(max_attempts))
-        self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
-
-    def fetch_archive(
-        self,
-        *,
-        plant_name: str,
-        target_date: date,
-        lat: float,
-        lon: float,
-        timezone: str = "Europe/London",
-        tilt_deg: Optional[float] = None,
-        azimuth_deg: Optional[float] = None,
-    ) -> list[HourlyWeatherRecord]:
-        """Fetch hourly archive weather for a single site/day."""
-        include_gti = tilt_deg is not None and azimuth_deg is not None
-        hourly_vars = list(HOURLY_VARS)
-        if include_gti:
-            hourly_vars.append("global_tilted_irradiance")
-
-        params: dict = {
-            "latitude": lat,
-            "longitude": lon,
-            "start_date": target_date.isoformat(),
-            "end_date": target_date.isoformat(),
-            "hourly": ",".join(hourly_vars),
-            "timezone": timezone,
-        }
-        if include_gti:
-            params["tilt"] = tilt_deg
-            params["azimuth"] = azimuth_deg
-
-        last_timeout: httpx.TimeoutException | None = None
-        with httpx.Client(timeout=self.timeout) as client:
-            for attempt in range(1, self.max_attempts + 1):
-                try:
-                    response = client.get(ARCHIVE_URL, params=params)
-                    response.raise_for_status()
-                    break
-                except httpx.TimeoutException as exc:
-                    last_timeout = exc
-                    if attempt >= self.max_attempts:
-                        raise WeatherFetchError(
-                            plant_name, None, f"Request timed out: {exc}"
-                        ) from exc
-                    if self.retry_backoff_seconds > 0:
-                        time.sleep(self.retry_backoff_seconds)
-                except httpx.HTTPStatusError as exc:
-                    raise WeatherFetchError(
-                        plant_name,
-                        exc.response.status_code,
-                        f"HTTP error: {exc}",
-                    ) from exc
-            else:
-                if last_timeout is not None:
-                    raise WeatherFetchError(
-                        plant_name,
-                        None,
-                        f"Request timed out: {last_timeout}",
-                    ) from last_timeout
-                raise WeatherFetchError(plant_name, None, "Archive fetch failed")
-
-        data = response.json()
-        return OpenMeteoClient()._parse_records(
-            plant_name=plant_name,
-            data=data,
-            timezone=timezone,
-            include_gti=include_gti,
-        )
