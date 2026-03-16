@@ -271,24 +271,46 @@ def get_juggle_monthly_data(plant_uid, emig_id, start_date, end_date):
     if not readings: return {}
 
     daily_map = {}
+    # Primary: cumulative energy counters (importEnergy or exportEnergy)
     grouped = {}
     for r in readings:
         ts = r.get('ts') or r.get('timestamp')
         if not ts: continue
-        
         val_ = val(r.get('importEnergy'))
         if val_ is None: val_ = val(r.get('exportEnergy'))
         if val_ is None: continue
-        
         dt_str = ts.split("T")[0]
         if dt_str not in grouped: grouped[dt_str] = []
         grouped[dt_str].append(float(val_))
-        
+
     for dt, vals in grouped.items():
         if vals:
             daily_kwh = (max(vals) - min(vals)) / 1000.0
             daily_map[dt] = daily_kwh
-            
+
+    # Fallback: integrate importActivePower (W) if no cumulative energy data found.
+    # Each half-hourly reading represents 0.5 h; positive values only (= generation).
+    if not any(v > 0 for v in daily_map.values()):
+        power_grouped = {}
+        for r in readings:
+            ts = r.get('ts') or r.get('timestamp')
+            if not ts: continue
+            pwr = val(r.get('importActivePower'))
+            if pwr is None: continue
+            try:
+                pwr_f = float(pwr)
+            except (TypeError, ValueError):
+                continue
+            if pwr_f <= 0: continue
+            dt_str = ts.split("T")[0]
+            if dt_str not in power_grouped: power_grouped[dt_str] = []
+            power_grouped[dt_str].append(pwr_f)
+        if power_grouped:
+            daily_map = {
+                dt: sum(pwrs) * 0.5 / 1000.0
+                for dt, pwrs in power_grouped.items()
+            }
+
     return daily_map
 
 def get_notion_headers():
