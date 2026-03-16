@@ -285,6 +285,7 @@ def build_email_body(
     no_comparison_sites: int,
     site_errors: int,
     site_rows: List[Tuple[str, float, float, float, float, str]],
+    top_n: int = 0,
 ) -> str:
     """Build a plain-text monthly email body mirroring daily alert format."""
     month_name = calendar.month_name[month_start.month]
@@ -297,13 +298,17 @@ def build_email_body(
             return "CRITICAL"
         return None
 
+    alert_rows = [
+        (site, meter_kwh, inv_kwh, diff_frac)
+        for site, meter_kwh, inv_kwh, _portal_kwh, diff_frac, _url in site_rows
+        if meter_kwh > 0 and inv_kwh > 0 and _alert_label(diff_frac) is not None
+    ]
+    alert_rows.sort(key=lambda x: abs(x[3]), reverse=True)
+    if top_n and top_n > 0:
+        alert_rows = alert_rows[:top_n]
     alert_lines: List[str] = []
-    for site, meter_kwh, inv_kwh, _portal_kwh, diff_frac, _url in site_rows:
-        if meter_kwh <= 0 or inv_kwh <= 0:
-            continue
+    for site, meter_kwh, inv_kwh, diff_frac in alert_rows:
         label = _alert_label(diff_frac)
-        if label is None:
-            continue
         diff_pct = diff_frac * 100.0
         alert_lines.append(
             f"- [{label}] {site} | Juggle Inv: {inv_kwh:,.1f} kWh | Meter: {meter_kwh:,.1f} kWh | Diff: {diff_pct:+.1f}%"
@@ -429,6 +434,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Create a Notion monthly email queue page.")
     p.add_argument("--run-type", choices=["PROD", "TEST"], default="TEST")
     p.add_argument("--month", help="Target month YYYY-MM. Defaults to previous month in SYNC_TIMEZONE.")
+    p.add_argument("--top-n", type=int, default=0, help="Limit alert rows to top N by absolute diff. 0 = include all.")
     p.add_argument("--recipients", help="Comma-separated email recipients. Falls back to env MONTHLY_EMAIL_RECIPIENTS.")
     p.add_argument("--comparison-db-id", help="Meter/inverter comparison database ID. Falls back to env NOTION_DB_ID.")
     p.add_argument("--queue-db-id", help="Email queue database ID. Falls back to env NOTION_EMAIL_QUEUE_DB_ID.")
@@ -501,6 +507,7 @@ def main() -> None:
         no_comparison_sites=no_comparison,
         site_errors=site_errors,
         site_rows=site_rows,
+        top_n=args.top_n,
     )
 
     name = f"{run_type} Monthly Summary {ym}"
