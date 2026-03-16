@@ -63,23 +63,26 @@ jobs:
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "Skipping: UK local time is ${UK_HOUR}:00 (not 04:00)."
-            exit 1
           fi
 
       - name: Checkout code
         uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+        if: steps.gate.outputs.run == 'true'
 
       - name: Install dependencies
+        if: steps.gate.outputs.run == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install requests
 
       - name: Validate required secrets
+        if: steps.gate.outputs.run == 'true'
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           WEEKLY_EMAIL_RECIPIENTS: ${{ secrets.WEEKLY_EMAIL_RECIPIENTS }}
@@ -97,6 +100,7 @@ jobs:
           fi
 
       - name: Verify Notion DB Access
+        if: steps.gate.outputs.run == 'true'
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
         run: |
@@ -123,6 +127,7 @@ jobs:
           PY
 
       - name: Create/Update Weekly Queue Page
+        if: steps.gate.outputs.run == 'true'
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           WEEKLY_EMAIL_RECIPIENTS: ${{ secrets.WEEKLY_EMAIL_RECIPIENTS }}
