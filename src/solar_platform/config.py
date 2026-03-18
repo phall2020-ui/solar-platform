@@ -129,6 +129,14 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_format: str = "console"
 
+    # Dynamics 365 CRM integration
+    dynamics_client_id: str = Field(default="", description="Azure AD app client ID")
+    dynamics_client_secret: str = Field(default="", description="Azure AD app client secret")
+    dynamics_tenant_id: str = Field(default="", description="Azure AD tenant ID")
+    dynamics_resource_url: str = Field(
+        default="", description="Dataverse environment URL, e.g. https://orgXXXXXX.crm11.dynamics.com"
+    )
+
     # Auth and integrations (future-safe)
     jwt_secret_key: str = ""
     default_admin_password: str = ""

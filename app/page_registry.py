@@ -180,6 +180,13 @@ PAGE_GROUPS: dict[str, PageGroup] = {
                 roles=["manager", "admin"],
                 description="Manage plant tariff schedules",
             ),
+            "Pipeline Dashboard": PageConfig(
+                module="app.pages.pipeline_dashboard",
+                func="render",
+                icon="📈",
+                roles=["manager", "admin"],
+                description="Investment opportunity pipeline from Dynamics 365 CRM",
+            ),
         },
     ),
     "Data Management": PageGroup(
