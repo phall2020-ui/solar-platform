@@ -1,0 +1,742 @@
+{
+  "version": "2.0",
+  "appTemplate": {
+    "name": "Solar Portfolio Reporting Dashboard",
+    "description": "Multi-source reporting dashboard combining CRM pipeline data (Dynamics 365), finance data (Azure SQL / Analysis Services), and linked reference tables.",
+    "pages": [
+      {
+        "id": "pipeline_overview",
+        "name": "Pipeline Overview",
+        "slug": "pipeline",
+        "queries": [
+          "getPipelineProjects",
+          "getAccounts",
+          "getRevenueByProject",
+          "getProjectFinanceLink",
+          "crmFinanceJoinTransformer",
+          "pipelineSummaryTransformer"
+        ]
+      },
+      {
+        "id": "construction_tracker",
+        "name": "Construction Tracker",
+        "slug": "construction",
+        "queries": [
+          "getConstructionStages",
+          "getPipelineProjects",
+          "constructionTransformer"
+        ]
+      },
+      {
+        "id": "asset_register",
+        "name": "Asset Register",
+        "slug": "assets",
+        "queries": [
+          "getAssets",
+          "assetTransformer"
+        ]
+      },
+      {
+        "id": "finance_summary",
+        "name": "Finance Summary",
+        "slug": "finance",
+        "queries": [
+          "getActualsByPeriod",
+          "getChartOfAccounts",
+          "getFinancePeriodMap",
+          "coaTransformer",
+          "periodMapTransformer",
+          "financeDisplayTransformer"
+        ]
+      },
+      {
+        "id": "budget_vs_actual",
+        "name": "Budget vs Actual",
+        "slug": "budget",
+        "queries": [
+          "getBudgetVsActual",
+          "getChartOfAccounts",
+          "coaTransformer",
+          "budgetVarianceTransformer"
+        ]
+      },
+      {
+        "id": "combined_pl",
+        "name": "Combined P&L",
+        "slug": "combined-pl",
+        "queries": [
+          "getPipelineProjects",
+          "getRevenueByProject",
+          "getProjectFinanceLink",
+          "crmFinanceJoinTransformer"
+        ]
+      },
+      {
+        "id": "admin",
+        "name": "Admin",
+        "slug": "admin",
+        "queries": [
+          "getPipelineProjects",
+          "getProjectLinks",
+          "upsertProjectLink",
+          "deleteProjectLink",
+          "getChartOfAccounts",
+          "adminLinkTransformer"
+        ]
+      }
+    ],
+    "queries": [
+      {
+        "id": "getPipelineProjects",
+        "name": "getPipelineProjects",
+        "resource": "Dynamics365_CRM",
+        "type": "DataverseListRecords",
+        "description": "Fetch all active pipeline projects from Dataverse. See queries/crm/pipeline_projects.js for field names.",
+        "config": {
+          "entitySetName": "cr_projects",
+          "filter": "statecode eq 0",
+          "select": "cr_projectid,cr_name,cr_stage,cr_capacity_kw,cr_contractvalue,cr_expectedstartdate,cr_expectedcompletiondate,cr_actualcompletiondate,_cr_accountid_value,cr_financecode,cr_location,cr_latitude,cr_longitude,createdon,modifiedon",
+          "expand": "cr_accountid($select=name,telephone1)",
+          "orderby": "createdon desc",
+          "top": 1000
+        },
+        "runWhenPageLoads": true,
+        "showFailureToaster": true
+      },
+      {
+        "id": "getAccounts",
+        "name": "getAccounts",
+        "resource": "Dynamics365_CRM",
+        "type": "DataverseListRecords",
+        "description": "Fetch client accounts for dropdowns.",
+        "config": {
+          "entitySetName": "accounts",
+          "filter": "statecode eq 0",
+          "select": "accountid,name,telephone1,emailaddress1,address1_city",
+          "orderby": "name asc",
+          "top": 500
+        },
+        "runWhenPageLoads": true
+      },
+      {
+        "id": "getConstructionStages",
+        "name": "getConstructionStages",
+        "resource": "Dynamics365_CRM",
+        "type": "DataverseListRecords",
+        "description": "Fetch all construction stage/milestone records.",
+        "config": {
+          "entitySetName": "cr_constructionstages",
+          "filter": "statecode eq 0",
+          "select": "cr_constructionstageid,cr_name,_cr_projectid_value,cr_stagename,cr_stageorder,cr_plannedstartdate,cr_plannedenddate,cr_actualstartdate,cr_actualenddate,cr_completionpercentage,cr_status,cr_notes",
+          "expand": "cr_projectid($select=cr_name,cr_capacity_kw)",
+          "orderby": "_cr_projectid_value,cr_stageorder",
+          "top": 2000
+        },
+        "runWhenPageLoads": true
+      },
+      {
+        "id": "getAssets",
+        "name": "getAssets",
+        "resource": "Dynamics365_CRM",
+        "type": "DataverseListRecords",
+        "description": "Fetch commissioned assets / asset register.",
+        "config": {
+          "entitySetName": "cr_assets",
+          "filter": "statecode eq 0",
+          "select": "cr_assetid,cr_name,_cr_projectid_value,_cr_accountid_value,cr_capacity_kwp,cr_capacity_kw,cr_commissiondate,cr_gridconnectiondate,cr_location,cr_latitude,cr_longitude,cr_technologytype,cr_assetstatus,cr_financecode,cr_inverterplatform,cr_annualyield_kwh,cr_notes,createdon",
+          "expand": "cr_projectid($select=cr_name),cr_accountid($select=name)",
+          "orderby": "cr_commissiondate desc",
+          "top": 2000
+        },
+        "runWhenPageLoads": true
+      },
+      {
+        "id": "getActualsByPeriod",
+        "name": "getActualsByPeriod",
+        "resource": "AzureSQL_Finance",
+        "type": "SQLQuery",
+        "description": "Period-level actuals from Azure SQL. See queries/finance/actuals_by_period.sql",
+        "query": "SELECT d.financial_year, d.period_number, d.period_name, d.calendar_month, d.calendar_year, d.month_name, a.account_code, a.account_name, a.account_category, a.account_subcategory, a.pl_line, a.cost_type, p.project_code, p.project_name, SUM(f.net_amount) AS net_amount FROM fact_actuals f INNER JOIN dim_date d ON f.date_key = d.date_key INNER JOIN dim_account a ON f.account_key = a.account_key INNER JOIN dim_project p ON f.project_key = p.project_key WHERE d.financial_year = {{fySelector.value}} AND d.period_number BETWEEN {{periodFrom.value}} AND {{periodTo.value}} AND f.posting_status = 'Posted' AND f.is_reversal = 0 GROUP BY d.financial_year, d.period_number, d.period_name, d.calendar_month, d.calendar_year, d.month_name, a.account_code, a.account_name, a.account_category, a.account_subcategory, a.pl_line, a.cost_type, p.project_code, p.project_name ORDER BY d.period_number, a.account_category, p.project_code",
+        "runWhenPageLoads": true,
+        "showFailureToaster": true
+      },
+      {
+        "id": "getBudgetVsActual",
+        "name": "getBudgetVsActual",
+        "resource": "AzureSQL_Finance",
+        "type": "SQLQuery",
+        "description": "Budget vs actual variance. See queries/finance/budget_vs_actual.sql",
+        "query": "-- See retool/queries/finance/budget_vs_actual.sql for the full parameterised query. Paste the CTE query here.",
+        "runWhenPageLoads": true
+      },
+      {
+        "id": "getRevenueByProject",
+        "name": "getRevenueByProject",
+        "resource": "AzureSQL_Finance",
+        "type": "SQLQuery",
+        "description": "Revenue, costs, margin per project. See queries/finance/revenue_by_project.sql",
+        "query": "SELECT p.project_code, p.project_name, p.cost_centre, SUM(CASE WHEN a.account_category = 'Revenue' THEN f.net_amount ELSE 0 END) AS revenue, SUM(CASE WHEN a.account_category = 'Direct Cost' THEN f.net_amount ELSE 0 END) AS direct_costs, SUM(CASE WHEN a.account_category = 'Overhead' THEN f.net_amount ELSE 0 END) AS overheads, SUM(CASE WHEN a.account_category = 'Revenue' THEN f.net_amount ELSE 0 END) - SUM(CASE WHEN a.account_category IN ('Direct Cost','Overhead') THEN f.net_amount ELSE 0 END) AS gross_profit FROM fact_actuals f INNER JOIN dim_date d ON f.date_key = d.date_key INNER JOIN dim_account a ON f.account_key = a.account_key INNER JOIN dim_project p ON f.project_key = p.project_key WHERE d.financial_year = {{fySelector.value}} AND d.period_number BETWEEN {{periodFrom.value}} AND {{periodTo.value}} AND f.posting_status = 'Posted' AND f.is_reversal = 0 GROUP BY p.project_code, p.project_name, p.cost_centre ORDER BY revenue DESC",
+        "runWhenPageLoads": true
+      },
+      {
+        "id": "getChartOfAccounts",
+        "name": "getChartOfAccounts",
+        "resource": "AzureSQL_Finance",
+        "type": "SQLQuery",
+        "description": "Chart of accounts reference",
+        "query": "SELECT account_code, account_name, account_category, account_subcategory, pl_line, cost_type, sort_order FROM dim_account WHERE is_active = 1 ORDER BY sort_order, account_code",
+        "runWhenPageLoads": true,
+        "runOnAppLoad": true
+      },
+      {
+        "id": "getFinancePeriodMap",
+        "name": "getFinancePeriodMap",
+        "resource": "retooldb",
+        "type": "SQLQuery",
+        "description": "Finance period to calendar month mapping from Retool Database",
+        "query": "SELECT financial_year, period_number, period_name, calendar_month, calendar_year, month_name, period_start, period_end FROM finance_period_map ORDER BY financial_year, period_number",
+        "runWhenPageLoads": true,
+        "runOnAppLoad": true
+      },
+      {
+        "id": "getProjectFinanceLink",
+        "name": "getProjectFinanceLink",
+        "resource": "retooldb",
+        "type": "SQLQuery",
+        "description": "CRM project GUID to Finance project code mapping",
+        "query": "SELECT id, crm_project_id, crm_project_name, finance_project_code, finance_cost_centre, link_status, notes FROM project_finance_link WHERE link_status = 'active' ORDER BY crm_project_name",
+        "runWhenPageLoads": true
+      },
+      {
+        "id": "getProjectLinks",
+        "name": "getProjectLinks",
+        "resource": "retooldb",
+        "type": "SQLQuery",
+        "description": "All project links for admin management",
+        "query": "SELECT * FROM project_finance_link ORDER BY crm_project_name",
+        "runWhenPageLoads": false
+      },
+      {
+        "id": "upsertProjectLink",
+        "name": "upsertProjectLink",
+        "resource": "retooldb",
+        "type": "SQLQuery",
+        "description": "Create or update a CRM→Finance project link",
+        "query": "INSERT INTO project_finance_link (crm_project_id, crm_project_name, finance_project_code, finance_cost_centre, notes, updated_at) VALUES ({{ upsertCrmId.value }}, {{ upsertCrmName.value }}, {{ upsertFinCode.value }}, {{ upsertCC.value }}, {{ upsertNotes.value }}, NOW()) ON CONFLICT (crm_project_id) DO UPDATE SET crm_project_name = EXCLUDED.crm_project_name, finance_project_code = EXCLUDED.finance_project_code, finance_cost_centre = EXCLUDED.finance_cost_centre, notes = EXCLUDED.notes, updated_at = NOW()",
+        "runWhenPageLoads": false,
+        "showSuccessToaster": true,
+        "successMessage": "Project link saved successfully"
+      },
+      {
+        "id": "deleteProjectLink",
+        "name": "deleteProjectLink",
+        "resource": "retooldb",
+        "type": "SQLQuery",
+        "description": "Remove a project link (soft delete)",
+        "query": "UPDATE project_finance_link SET link_status = 'archived', updated_at = NOW() WHERE id = {{ projectLinksTable.selectedRow.data.id }}",
+        "runWhenPageLoads": false,
+        "requireConfirmation": true,
+        "confirmationMessage": "Archive this project link? The project will no longer appear in combined finance views."
+      }
+    ],
+    "transformers": [
+      {
+        "id": "periodMapTransformer",
+        "name": "periodMapTransformer",
+        "description": "Finance period to calendar month utilities. See queries/transforms/period_to_month_map.js",
+        "type": "transformer"
+      },
+      {
+        "id": "coaTransformer",
+        "name": "coaTransformer",
+        "description": "Chart of accounts lookup and grouping utilities. See queries/transforms/coa_lookup.js",
+        "type": "transformer"
+      },
+      {
+        "id": "crmFinanceJoinTransformer",
+        "name": "crmFinanceJoinTransformer",
+        "description": "Cross-source join of CRM projects to Finance data. See queries/transforms/crm_finance_join.js",
+        "type": "transformer"
+      },
+      {
+        "id": "pipelineSummaryTransformer",
+        "name": "pipelineSummaryTransformer",
+        "description": "Pipeline funnel, KPI tiles, and close forecasts. See queries/transforms/pipeline_summary.js",
+        "type": "transformer"
+      },
+      {
+        "id": "constructionTransformer",
+        "name": "constructionTransformer",
+        "description": "Groups construction stages by project and calculates completion. See queries/crm/construction_stages.js (groupStagesByProject function)",
+        "type": "transformer"
+      },
+      {
+        "id": "assetTransformer",
+        "name": "assetTransformer",
+        "description": "Transforms raw asset data and computes portfolio summary. See queries/crm/assets.js",
+        "type": "transformer"
+      },
+      {
+        "id": "financeDisplayTransformer",
+        "name": "financeDisplayTransformer",
+        "description": "Enriches actuals with COA display names and groups by P&L line",
+        "type": "transformer"
+      },
+      {
+        "id": "budgetVarianceTransformer",
+        "name": "budgetVarianceTransformer",
+        "description": "Adds RAG status and formatting to budget vs actual data",
+        "type": "transformer"
+      },
+      {
+        "id": "adminLinkTransformer",
+        "name": "adminLinkTransformer",
+        "description": "Merges CRM project list with existing links for admin table",
+        "type": "transformer"
+      }
+    ],
+    "globalState": {
+      "selectedFY": "2024/25",
+      "selectedPeriodFrom": 1,
+      "selectedPeriodTo": 12,
+      "selectedProjectId": null,
+      "selectedStageFilter": ""
+    },
+    "sharedComponents": [
+      {
+        "id": "fySelector",
+        "type": "Select",
+        "label": "Financial Year",
+        "options": "{{ periodMapTransformer.buildFYOptions() }}",
+        "defaultValue": "2024/25",
+        "description": "Financial year filter — shared across all pages"
+      },
+      {
+        "id": "periodFrom",
+        "type": "NumberInput",
+        "label": "Period From",
+        "defaultValue": 1,
+        "min": 1,
+        "max": 12
+      },
+      {
+        "id": "periodTo",
+        "type": "NumberInput",
+        "label": "Period To",
+        "defaultValue": 12,
+        "min": 1,
+        "max": 12
+      }
+    ],
+    "pageComponents": {
+      "pipeline_overview": [
+        {
+          "id": "pipelineKPIRow",
+          "type": "Container",
+          "layout": "horizontal",
+          "children": [
+            {
+              "id": "kpiPipelineCount",
+              "type": "Statistic",
+              "label": "Pipeline Projects",
+              "value": "{{ pipelineSummaryTransformer.kpis.pipelineCount }}",
+              "description": "Active opportunities"
+            },
+            {
+              "id": "kpiPipelineMw",
+              "type": "Statistic",
+              "label": "Pipeline Capacity",
+              "value": "{{ pipelineSummaryTransformer.kpis.pipelineCapacityMw }} MWp",
+              "description": "Total MW in pipeline"
+            },
+            {
+              "id": "kpiUnderConstruction",
+              "type": "Statistic",
+              "label": "Under Construction",
+              "value": "{{ pipelineSummaryTransformer.kpis.underConstructionCount }} projects",
+              "description": "{{ pipelineSummaryTransformer.kpis.underConstructionMw }} MWp"
+            },
+            {
+              "id": "kpiLiveMw",
+              "type": "Statistic",
+              "label": "Live / Commissioned",
+              "value": "{{ pipelineSummaryTransformer.kpis.liveMw }} MWp",
+              "description": "{{ pipelineSummaryTransformer.kpis.liveCount }} sites"
+            },
+            {
+              "id": "kpiTotalValue",
+              "type": "Statistic",
+              "label": "Total Pipeline Value",
+              "value": "{{ formatCurrency(pipelineSummaryTransformer.kpis.pipelineValueTotal) }}",
+              "description": "Contract value"
+            }
+          ]
+        },
+        {
+          "id": "pipelineFunnelChart",
+          "type": "BarChart",
+          "title": "Pipeline by Stage",
+          "data": "{{ pipelineSummaryTransformer.funnel }}",
+          "xAxis": "stage",
+          "yAxis": ["count", "totalCapMw"],
+          "colors": ["#3b82f6", "#10b981"]
+        },
+        {
+          "id": "closingForecastChart",
+          "type": "BarChart",
+          "title": "Expected Completions by Month",
+          "data": "{{ pipelineSummaryTransformer.closingForecast }}",
+          "xAxis": "month",
+          "yAxis": ["count", "capacityKw"],
+          "description": "Projects reaching completion each month"
+        },
+        {
+          "id": "pipelineTable",
+          "type": "Table",
+          "title": "Pipeline Projects",
+          "data": "{{ crmFinanceJoinTransformer.projects }}",
+          "columns": [
+            { "key": "crmName",         "label": "Project Name",     "sortable": true },
+            { "key": "stage",            "label": "Stage",            "sortable": true },
+            { "key": "clientName",       "label": "Client",           "sortable": true },
+            { "key": "capacityKw",       "label": "Capacity (kW)",    "sortable": true, "type": "number" },
+            { "key": "contractValue",    "label": "Contract Value",   "sortable": true, "type": "currency" },
+            { "key": "revenue",          "label": "Actual Revenue",   "sortable": true, "type": "currency" },
+            { "key": "grossProfit",      "label": "Gross Profit",     "sortable": true, "type": "currency" },
+            { "key": "marginPct",        "label": "Margin %",         "sortable": true, "type": "number", "suffix": "%" },
+            { "key": "marginRag",        "label": "RAG",              "type": "tag", "colorMap": { "GREEN": "green", "AMBER": "orange", "RED": "red", "GREY": "gray" } },
+            { "key": "expectedEnd",      "label": "Expected End",     "sortable": true, "type": "date" },
+            { "key": "hasFinanceData",   "label": "Linked",           "type": "boolean" }
+          ],
+          "searchable": true,
+          "downloadable": true
+        }
+      ],
+      "construction_tracker": [
+        {
+          "id": "constructionKPIRow",
+          "type": "Container",
+          "layout": "horizontal",
+          "children": [
+            {
+              "id": "kpiActiveBuilds",
+              "type": "Statistic",
+              "label": "Active Builds",
+              "value": "{{ constructionTransformer.filter(p => p.overallPct < 100).length }}"
+            },
+            {
+              "id": "kpiOverdueStages",
+              "type": "Statistic",
+              "label": "Overdue Stages",
+              "value": "{{ constructionTransformer.reduce((s,p) => s + p.stagesOverdue, 0) }}",
+              "color": "red"
+            },
+            {
+              "id": "kpiCompletedBuilds",
+              "type": "Statistic",
+              "label": "Completed",
+              "value": "{{ constructionTransformer.filter(p => p.overallPct >= 100).length }}"
+            }
+          ]
+        },
+        {
+          "id": "constructionProgressTable",
+          "type": "Table",
+          "title": "Construction Progress by Project",
+          "data": "{{ constructionTransformer }}",
+          "columns": [
+            { "key": "projectName",    "label": "Project",          "sortable": true },
+            { "key": "projectCapKw",   "label": "Capacity (kW)",    "type": "number" },
+            { "key": "overallPct",     "label": "Overall %",        "type": "progressBar" },
+            { "key": "stagesComplete", "label": "Stages Complete",  "type": "number" },
+            { "key": "stagesOverdue",  "label": "Overdue Stages",   "type": "number", "colorMap": { "condition": ">0", "color": "red" } }
+          ]
+        },
+        {
+          "id": "stagesDetailTable",
+          "type": "Table",
+          "title": "Milestone Detail",
+          "data": "{{ constructionTransformer.find(p => p.projectId === constructionProgressTable.selectedRow?.data?.projectId)?.stages || [] }}",
+          "columns": [
+            { "key": "stageName",     "label": "Stage" },
+            { "key": "plannedStart",  "label": "Planned Start",  "type": "date" },
+            { "key": "plannedEnd",    "label": "Planned End",    "type": "date" },
+            { "key": "actualStart",   "label": "Actual Start",   "type": "date" },
+            { "key": "actualEnd",     "label": "Actual End",     "type": "date" },
+            { "key": "completionPct", "label": "% Complete",     "type": "progressBar" },
+            { "key": "status",        "label": "Status" },
+            { "key": "isOverdue",     "label": "Overdue",        "type": "boolean" }
+          ]
+        }
+      ],
+      "asset_register": [
+        {
+          "id": "assetKPIRow",
+          "type": "Container",
+          "layout": "horizontal",
+          "children": [
+            {
+              "id": "kpiTotalAssets",
+              "type": "Statistic",
+              "label": "Total Assets",
+              "value": "{{ assetTransformer.portfolioSummary?.totalAssets || assetTransformer.length }}"
+            },
+            {
+              "id": "kpiTotalMwp",
+              "type": "Statistic",
+              "label": "Total Capacity",
+              "value": "{{ assetTransformer.portfolioSummary?.totalCapacityMwp }} MWp"
+            },
+            {
+              "id": "kpiAnnualYield",
+              "type": "Statistic",
+              "label": "Expected Annual Yield",
+              "value": "{{ assetTransformer.portfolioSummary?.annualYieldGwh }} GWh"
+            }
+          ]
+        },
+        {
+          "id": "assetMap",
+          "type": "MapBox",
+          "title": "Asset Locations",
+          "data": "{{ assetTransformer.assets || assetTransformer }}",
+          "lat": "lat",
+          "lng": "lng",
+          "tooltip": "name",
+          "markerSize": "capacityKwp",
+          "description": "Marker size proportional to installed capacity"
+        },
+        {
+          "id": "assetTable",
+          "type": "Table",
+          "title": "Asset Register",
+          "data": "{{ assetTransformer.assets || assetTransformer }}",
+          "columns": [
+            { "key": "name",            "label": "Asset Name",        "sortable": true },
+            { "key": "clientName",      "label": "Client",            "sortable": true },
+            { "key": "location",        "label": "Location" },
+            { "key": "capacityKwp",     "label": "Capacity (kWp)",    "type": "number", "sortable": true },
+            { "key": "technology",      "label": "Technology" },
+            { "key": "commissionDate",  "label": "Commissioned",      "type": "date", "sortable": true },
+            { "key": "status",          "label": "Status" },
+            { "key": "annualYieldKwh",  "label": "Annual Yield (kWh)","type": "number" },
+            { "key": "financeCode",     "label": "Finance Code" },
+            { "key": "inverterPlatform","label": "Inverter Platform" }
+          ],
+          "searchable": true,
+          "downloadable": true
+        }
+      ],
+      "finance_summary": [
+        {
+          "id": "financeFilterRow",
+          "type": "Container",
+          "layout": "horizontal",
+          "children": [
+            { "id": "fySelector",     "type": "Select",      "label": "Financial Year" },
+            { "id": "periodFrom",     "type": "NumberInput", "label": "From Period" },
+            { "id": "periodTo",       "type": "NumberInput", "label": "To Period" },
+            { "id": "categoryFilter", "type": "Select",      "label": "Account Category",
+              "options": "{{ coaTransformer.categoryOptions() }}" }
+          ]
+        },
+        {
+          "id": "plSummaryTable",
+          "type": "Table",
+          "title": "P&L Summary by Category",
+          "data": "{{ coaTransformer.groupByPLLine(financeDisplayTransformer) }}",
+          "columns": [
+            { "key": "pl_line",   "label": "P&L Line" },
+            { "key": "actual",    "label": "Actual (£)",   "type": "currency", "sortable": true },
+            { "key": "budget",    "label": "Budget (£)",   "type": "currency" },
+            { "key": "variance",  "label": "Variance (£)", "type": "currency" },
+            { "key": "variance_pct", "label": "Var %",     "type": "number", "suffix": "%" }
+          ]
+        },
+        {
+          "id": "actualsByPeriodChart",
+          "type": "BarChart",
+          "title": "Monthly Actuals",
+          "data": "{{ financeDisplayTransformer }}",
+          "xAxis": "month_name",
+          "yAxis": ["net_amount"],
+          "groupBy": "account_category"
+        },
+        {
+          "id": "actualsDetailTable",
+          "type": "Table",
+          "title": "Transaction Detail",
+          "data": "{{ financeDisplayTransformer }}",
+          "columns": [
+            { "key": "period_name",              "label": "Period" },
+            { "key": "month_name",               "label": "Month" },
+            { "key": "account_code",             "label": "Account Code" },
+            { "key": "account_name_display",     "label": "Account Name" },
+            { "key": "account_category_display", "label": "Category" },
+            { "key": "pl_line_display",          "label": "P&L Line" },
+            { "key": "project_code",             "label": "Project" },
+            { "key": "net_amount",               "label": "Amount (£)", "type": "currency", "sortable": true }
+          ],
+          "searchable": true,
+          "downloadable": true
+        }
+      ],
+      "budget_vs_actual": [
+        {
+          "id": "bvaFilterRow",
+          "type": "Container",
+          "layout": "horizontal",
+          "children": [
+            { "id": "fySelector",     "type": "Select",      "label": "Financial Year" },
+            { "id": "periodFrom",     "type": "NumberInput", "label": "From Period" },
+            { "id": "periodTo",       "type": "NumberInput", "label": "To Period" },
+            { "id": "categoryFilter", "type": "Select",      "label": "Category Filter",
+              "options": "{{ coaTransformer.categoryOptions() }}" }
+          ]
+        },
+        {
+          "id": "bvaRAGSummary",
+          "type": "Container",
+          "layout": "horizontal",
+          "children": [
+            { "id": "bvaGreen", "type": "Statistic", "label": "On Track",    "value": "{{ budgetVarianceTransformer.filter(r => r.rag_status === 'GREEN').length }}", "color": "green" },
+            { "id": "bvaAmber", "type": "Statistic", "label": "At Risk",     "value": "{{ budgetVarianceTransformer.filter(r => r.rag_status === 'AMBER').length }}", "color": "orange" },
+            { "id": "bvaRed",   "type": "Statistic", "label": "Overspent",   "value": "{{ budgetVarianceTransformer.filter(r => r.rag_status === 'RED').length }}",   "color": "red" }
+          ]
+        },
+        {
+          "id": "bvaWaterfallChart",
+          "type": "BarChart",
+          "title": "Budget vs Actual by Account Category",
+          "data": "{{ budgetVarianceTransformer }}",
+          "xAxis": "account_category",
+          "yAxis": ["budget_amount", "actual_amount"],
+          "colors": ["#94a3b8", "#3b82f6"]
+        },
+        {
+          "id": "bvaTable",
+          "type": "Table",
+          "title": "Budget vs Actual Detail",
+          "data": "{{ budgetVarianceTransformer }}",
+          "columns": [
+            { "key": "period_name",       "label": "Period" },
+            { "key": "account_code",      "label": "Code" },
+            { "key": "account_name",      "label": "Account" },
+            { "key": "account_category",  "label": "Category" },
+            { "key": "project_name",      "label": "Project" },
+            { "key": "budget_amount",     "label": "Budget",   "type": "currency" },
+            { "key": "actual_amount",     "label": "Actual",   "type": "currency" },
+            { "key": "variance_amount",   "label": "Variance", "type": "currency" },
+            { "key": "variance_pct",      "label": "Var %",    "type": "number", "suffix": "%" },
+            { "key": "rag_status",        "label": "RAG",      "type": "tag",
+              "colorMap": { "GREEN": "green", "AMBER": "orange", "RED": "red", "GREY": "gray" } }
+          ],
+          "searchable": true,
+          "downloadable": true,
+          "conditionalRowStyles": [
+            { "condition": "rag_status === 'RED'",   "backgroundColor": "#fef2f2" },
+            { "condition": "rag_status === 'AMBER'", "backgroundColor": "#fffbeb" }
+          ]
+        }
+      ],
+      "combined_pl": [
+        {
+          "id": "combinedSummaryKPIs",
+          "type": "Container",
+          "layout": "horizontal",
+          "children": [
+            { "id": "kpiTotalRevenue",   "type": "Statistic", "label": "Total Revenue",    "value": "{{ formatCurrency(crmFinanceJoinTransformer.summary.totalRevenue) }}" },
+            { "id": "kpiTotalProfit",    "type": "Statistic", "label": "Total Gross Profit","value": "{{ formatCurrency(crmFinanceJoinTransformer.summary.totalGrossProfit) }}" },
+            { "id": "kpiAvgMargin",      "type": "Statistic", "label": "Avg Margin",        "value": "{{ crmFinanceJoinTransformer.summary.avgMarginPct }}%" },
+            { "id": "kpiLinked",         "type": "Statistic", "label": "Linked to Finance", "value": "{{ crmFinanceJoinTransformer.summary.linkedToFinance }} / {{ crmFinanceJoinTransformer.summary.totalProjects }}" }
+          ]
+        },
+        {
+          "id": "combinedPLTable",
+          "type": "Table",
+          "title": "Project P&L (CRM + Finance Combined)",
+          "data": "{{ crmFinanceJoinTransformer.projects }}",
+          "columns": [
+            { "key": "crmName",          "label": "Project",          "sortable": true },
+            { "key": "stage",            "label": "Stage",            "sortable": true },
+            { "key": "clientName",       "label": "Client" },
+            { "key": "capacityKw",       "label": "kW",               "type": "number" },
+            { "key": "contractValue",    "label": "Contract (£)",     "type": "currency", "sortable": true },
+            { "key": "revenue",          "label": "Revenue (£)",      "type": "currency", "sortable": true },
+            { "key": "directCosts",      "label": "Direct Cost (£)",  "type": "currency" },
+            { "key": "grossProfit",      "label": "Gross Profit (£)", "type": "currency" },
+            { "key": "marginPct",        "label": "Margin %",         "type": "number", "suffix": "%" },
+            { "key": "contractVsRevenuePct", "label": "Contract vs Rev %", "type": "number", "suffix": "%" },
+            { "key": "marginRag",        "label": "RAG",              "type": "tag",
+              "colorMap": { "GREEN": "green", "AMBER": "orange", "RED": "red", "GREY": "gray" } },
+            { "key": "financeCode",      "label": "Finance Code" },
+            { "key": "isLinked",         "label": "Linked",           "type": "boolean" }
+          ],
+          "searchable": true,
+          "downloadable": true
+        }
+      ],
+      "admin": [
+        {
+          "id": "adminTitle",
+          "type": "Text",
+          "value": "## Admin — Project Finance Links\n\nLink CRM projects to their corresponding Finance project codes. This enables the Combined P&L and project-level finance views."
+        },
+        {
+          "id": "projectLinksTable",
+          "type": "Table",
+          "title": "Project Links",
+          "data": "{{ adminLinkTransformer }}",
+          "editable": true,
+          "columns": [
+            { "key": "crm_project_id",       "label": "CRM ID",        "editable": false },
+            { "key": "crm_project_name",      "label": "CRM Project",   "editable": false },
+            { "key": "finance_project_code",  "label": "Finance Code",  "editable": true },
+            { "key": "finance_cost_centre",   "label": "Cost Centre",   "editable": true },
+            { "key": "notes",                 "label": "Notes",         "editable": true },
+            { "key": "is_linked",             "label": "Linked",        "type": "boolean" }
+          ]
+        },
+        {
+          "id": "adminSaveButton",
+          "type": "Button",
+          "label": "Save Selected Link",
+          "onClick": "upsertProjectLink.trigger()"
+        },
+        {
+          "id": "adminDeleteButton",
+          "type": "Button",
+          "label": "Archive Selected Link",
+          "variant": "danger",
+          "onClick": "deleteProjectLink.trigger()"
+        }
+      ]
+    }
+  },
+  "_instructions": {
+    "howToImport": [
+      "1. In Retool, go to Apps → Import",
+      "2. This JSON is a configuration template, not a direct Retool export format.",
+      "   Retool's native export format differs by version — use this as your build guide.",
+      "3. Create each Page listed in pages[] manually in Retool",
+      "4. Create each Query listed in queries[] — paste the SQL/config from the queries/ folder",
+      "5. Create each Transformer listed in transformers[] — paste code from queries/transforms/",
+      "6. Build the UI components described in pageComponents[] using Retool's drag-and-drop editor",
+      "7. Set up the shared FY/Period filter components and wire them to each query"
+    ],
+    "resourceNames": {
+      "Dynamics365_CRM": "Your Dataverse connector resource",
+      "AzureSQL_Finance": "Your Azure SQL / Analysis Services resource",
+      "retooldb": "Retool's built-in hosted database (auto-available)"
+    },
+    "firstSteps": [
+      "1. Connect data sources (see datasources/ folder)",
+      "2. Discover your actual Dataverse entity/field names (see schemas/dataverse_tables.md)",
+      "3. Update FIELD_PREFIX and entity names in all queries/crm/ files",
+      "4. Create Retool Database tables using DDL in datasources/spreadsheet_imports.md",
+      "5. Load your finance period map and COA data",
+      "6. Create the project_finance_link entries for your projects",
+      "7. Build dashboard pages using the component specs above"
+    ]
+  }
+}
