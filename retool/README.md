@@ -33,24 +33,18 @@ This guide covers connecting all three data sources to Retool and building the r
 
 ## Step 1 — Connect Dynamics 365 Dataverse
 
-### Option A: Native Dataverse Connector (Recommended)
-Retool has a first-class Microsoft Dataverse connector.
+### Using a REST API Resource
+Retool does not have a native Dataverse connector. Use Retool's **REST API** resource type:
 
-1. In Retool, go to **Resources → Create New Resource → Microsoft Dataverse**
+1. In Retool, go to **Resources → Create New Resource → REST API**
 2. Fill in:
-   - **Base URL**: `https://ampyrproduction.crm.dynamics.com` (adjust region if needed — `.crm4.`, `.crm11.` etc.)
-   - **Authentication**: OAuth 2.0 (Client Credentials)
-   - **Azure AD Tenant ID**: your tenant GUID
-   - **Client ID**: your App Registration client ID
-   - **Client Secret**: your App Registration secret
+   - **Name**: `Dynamics365_CRM`
+   - **Base URL**: `https://ampyrproduction.crm.dynamics.com/api/data/v9.2`
+   - **Authentication**: OAuth 2.0 (Client Credentials flow)
+   - **Token URL**: `https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token`
+   - **Client ID** and **Client Secret**: from your Azure App Registration
    - **Scope**: `https://ampyrproduction.crm.dynamics.com/.default`
-3. Name the resource: `Dynamics365_CRM`
-
-### Option B: REST API Resource (fallback)
-If the Dataverse connector isn't available on your Retool plan, use a Generic REST API resource:
-- **Base URL**: `https://ampyrproduction.crm.dynamics.com/api/data/v9.2`
-- **Authentication**: OAuth 2.0 with the same settings above
-- Add header: `OData-MaxVersion: 4.0`, `OData-Version: 4.0`, `Accept: application/json`
+3. Add default headers: `OData-MaxVersion: 4.0`, `OData-Version: 4.0`, `Accept: application/json`
 
 ### Azure App Registration Setup
 1. Azure Portal → **Azure Active Directory → App Registrations → New Registration**

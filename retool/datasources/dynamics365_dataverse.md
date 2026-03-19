@@ -42,37 +42,40 @@ All table names in Dataverse use a logical name with a publisher prefix (e.g., `
 
 ## Retool Resource Setup
 
-### Using Native Dataverse Connector
-1. Retool → **Resources → Create New Resource → Microsoft Dataverse**
-2. Settings:
-   ```
-   Environment URL:  https://ampyrproduction.crm.dynamics.com
-   Authentication:   OAuth 2.0 (Client Credentials)
-   Tenant ID:        <your-tenant-id>
-   Client ID:        <your-client-id>
-   Client Secret:    <your-client-secret>
-   ```
-3. Click **Test Connection → Save**
-4. Name: `Dynamics365_CRM`
+> **Note**: Retool does not have a native Microsoft Dataverse connector. The correct approach is to use Retool's **REST API** resource type, pointing directly at the Dataverse OData endpoint. This is the standard method.
 
-### Using REST API Resource (fallback)
+### Step 1: Create a REST API Resource
 1. Retool → **Resources → Create New Resource → REST API**
 2. Settings:
    ```
+   Name:             Dynamics365_CRM
    Base URL:         https://ampyrproduction.crm.dynamics.com/api/data/v9.2
-   Authentication:   OAuth 2.0
+   Authentication:   OAuth 2.0 (Client Credentials flow)
    Token URL:        https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token
    Client ID:        <your-client-id>
    Client Secret:    <your-client-secret>
    Scope:            https://ampyrproduction.crm.dynamics.com/.default
    ```
-3. Add default headers:
+3. Add default headers (under **Headers** in the resource config):
    ```
    OData-MaxVersion: 4.0
    OData-Version:    4.0
    Accept:           application/json; odata.metadata=minimal
    Prefer:           odata.include-annotations=OData.Community.Display.V1.FormattedValue
    ```
+4. Click **Test → Save**
+
+### Step 2: Create Queries in Your App
+Each CRM query is a **GET** request on this resource. Example — list active projects:
+```
+Method: GET
+Path:   /cr_projects?$filter=statecode eq 0&$top=1000&$select=cr_name,cr_stage,cr_capacity_kw
+```
+
+See the `queries/crm/` folder for full OData parameters for each table.
+
+### Alternative: CData Connect Cloud (no-code middleware)
+If OAuth setup is blocked by IT policy, [CData Connect Cloud](https://www.cdata.com/kb/tech/dataverse-cloud-retool.rst) can act as middleware, exposing Dataverse as either an **OpenAPI** resource or a **SQL Server** resource in Retool. This adds a paid dependency but avoids the Azure App Registration.
 
 ---
 
@@ -86,7 +89,7 @@ GET /EntityDefinitions?$select=LogicalName,DisplayName,IsCustomEntity
     &$orderby=LogicalName
 ```
 
-Or in the Dataverse connector query editor, use the Table endpoint browser.
+Run this as a GET query on the `Dynamics365_CRM` REST API resource.
 
 Common Dataverse entity set names follow the pattern `{logicalname}s` or custom plurals. To find exact collection names:
 
