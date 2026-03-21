@@ -207,6 +207,53 @@ jobs:
           repository: phall2020-ui/experimental-repo
           event-type: nightly-sync
 
+      - name: Send failure notification
+        if: failure()
+        env:
+          SYNC_SMTP_SERVER: ${{ secrets.SYNC_SMTP_SERVER }}
+          SYNC_SMTP_PORT: ${{ secrets.SYNC_SMTP_PORT }}
+          SYNC_SMTP_USERNAME: ${{ secrets.SYNC_SMTP_USERNAME }}
+          SYNC_SMTP_PASSWORD: ${{ secrets.SYNC_SMTP_PASSWORD }}
+          SYNC_EMAIL_FROM: ${{ secrets.SYNC_EMAIL_FROM }}
+          SYNC_EMAIL_TO: ${{ secrets.SYNC_EMAIL_TO }}
+        run: |
+          python - <<'PY'
+          import os, smtplib, ssl
+          from email.mime.text import MIMEText
+          from email.mime.multipart import MIMEMultipart
+          from datetime import datetime
+
+          smtp_server = os.environ.get("SYNC_SMTP_SERVER")
+          smtp_port = int(os.environ.get("SYNC_SMTP_PORT", "587"))
+          username = os.environ.get("SYNC_SMTP_USERNAME")
+          password = os.environ.get("SYNC_SMTP_PASSWORD")
+          from_email = os.environ.get("SYNC_EMAIL_FROM")
+          to_emails = os.environ.get("SYNC_EMAIL_TO", "").split(",")
+
+          if not all([smtp_server, username, password, from_email, to_emails]):
+              print("Missing SMTP configuration. Cannot send failure alert.")
+              exit(0)
+
+          subject = f"❌ GitHub Action FAILURE: solar-platform Daily Sync ({datetime.now().strftime('%Y-%m-%d')})"
+          body = f"The solar-platform Daily Notion Pull workflow has failed.\n\nRun URL: https://github.com/{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/{os.environ.get('GITHUB_RUN_ID')}\n\nPlease check the logs for details."
+
+          msg = MIMEMultipart()
+          msg['Subject'] = subject
+          msg['From'] = from_email
+          msg['To'] = ", ".join(to_emails)
+          msg.attach(MIMEText(body, 'plain'))
+
+          context = ssl.create_default_context()
+          try:
+              with smtplib.SMTP(smtp_server, smtp_port) as server:
+                  server.starttls(context=context)
+                  server.login(username, password)
+                  server.sendmail(from_email, to_emails, msg.as_string())
+              print("Failure notification email sent.")
+          except Exception as e:
+              print(f"Failed to send email: {e}")
+          PY
+
       - name: Write job summary
         if: always()
         run: |

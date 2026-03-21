@@ -223,5 +223,20 @@
         "platform": "solis",
         "site_id": "1298491919448677612",
         "juggle_uid": "?"
+    },
+    "Morpheus Benelux": {
+        "platform": "juggle",
+        "site_id": "",
+        "juggle_uid": "?"
+    },
+    "Morpheus Iberia": {
+        "platform": "juggle",
+        "site_id": "",
+        "juggle_uid": "?"
+    },
+    "Morpheus UK": {
+        "platform": "juggle",
+        "site_id": "",
+        "juggle_uid": "?"
     }
 }

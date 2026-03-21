@@ -122,3 +122,19 @@ Use these directories for all new work:
 - `docs/ADMIN_GUIDE.md`
 - `docs/USER_GUIDE.md`
 - `docs/development/` (implementation notes and technical plans)
+
+## Next steps
+
+- Merge branch `codex/copilot-triage-publish-run` into `main` after testing
+- Complete Morpheus site onboarding: add Benelux/Iberia/UK sites post-acquisition, including Holcim (Obourg) once PAC is issued
+- Fix `Monthly Email Queue` workflow — fails without `MONTHLY_EMAIL_RECIPIENTS` input
+- Add Juggle API client to `tools/inverter-data-juggle/` (current sync relies on SolarEdge and Solis only)
+- Set up alerting for GitHub Actions workflow failures — no notification currently if daily sync breaks
+
+## Areas to improve
+
+- **No PR vs irradiance baseline** — `copilot_audit.py` flags faults but does not compare actual yield against expected from irradiance
+- **No `.env.example`** at repo root — new developers cannot discover required secrets without reading multiple files
+- **No `CONTRIBUTING.md`** — multi-component architecture (core library, Streamlit app, FastAPI, CLI) is not documented for contributors
+- **Metris billing not ingested** — portal access is active but no pipeline imports Metris budget vs actual data into the platform
+- **One-off scripts in codebase** — `platform/reports/away_day_2026/` and similar should be archived or moved out of `main`
