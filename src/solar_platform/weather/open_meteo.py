@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 import httpx
 
 BASE_URL = "https://api.open-meteo.com/v1/forecast"
+ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 DEFAULT_MODEL = "ukmo_seamless"
 DEFAULT_DAYS = 7
 
@@ -186,3 +187,82 @@ class OpenMeteoClient:
     ) -> dict[str, list[HourlyWeatherRecord]]:
         """Synchronous wrapper around batch_forecast."""
         return asyncio.run(self.batch_forecast(sites))
+
+
+class OpenMeteoArchiveClient:
+    """Synchronous client for the Open-Meteo historical archive API."""
+
+    def __init__(self, timeout: float = 30.0) -> None:
+        self.timeout = timeout
+
+    def fetch_archive(
+        self,
+        plant_name: str,
+        target_date: date,
+        lat: float,
+        lon: float,
+        timezone: str = "Europe/London",
+        tilt_deg: Optional[float] = None,
+        azimuth_deg: Optional[float] = None,
+    ) -> list[HourlyWeatherRecord]:
+        """Fetch hourly historical data for a single site and date."""
+        include_gti = tilt_deg is not None and azimuth_deg is not None
+        hourly_vars = list(HOURLY_VARS)
+        if include_gti:
+            hourly_vars.append("global_tilted_irradiance")
+
+        date_str = target_date.isoformat()
+        params: dict = {
+            "latitude": lat,
+            "longitude": lon,
+            "hourly": ",".join(hourly_vars),
+            "start_date": date_str,
+            "end_date": date_str,
+            "timezone": timezone,
+        }
+        if include_gti:
+            params["tilt"] = tilt_deg
+            params["azimuth"] = azimuth_deg
+
+        try:
+            response = httpx.get(ARCHIVE_URL, params=params, timeout=self.timeout)
+            response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise WeatherFetchError(plant_name, None, f"Request timed out: {exc}") from exc
+        except httpx.HTTPStatusError as exc:
+            raise WeatherFetchError(
+                plant_name,
+                exc.response.status_code,
+                f"HTTP error: {exc}",
+            ) from exc
+
+        data = response.json()
+        tz = ZoneInfo(timezone)
+        hourly = data["hourly"]
+        times: list[str] = hourly["time"]
+
+        def _get(key: str, index: int) -> Optional[float]:
+            col = hourly.get(key, [])
+            if index >= len(col):
+                return None
+            return col[index]
+
+        records: list[HourlyWeatherRecord] = []
+        for i, ts_str in enumerate(times):
+            timestamp = datetime.fromisoformat(ts_str).replace(tzinfo=tz)
+            records.append(
+                HourlyWeatherRecord(
+                    plant_name=plant_name,
+                    timestamp=timestamp,
+                    ghi_wm2=_get("shortwave_radiation", i),
+                    dni_wm2=_get("direct_normal_irradiance", i),
+                    dhi_wm2=_get("diffuse_radiation", i),
+                    direct_radiation_wm2=_get("direct_radiation", i),
+                    gti_wm2=_get("global_tilted_irradiance", i) if include_gti else None,
+                    cloud_cover_pct=_get("cloud_cover", i),
+                    temperature_c=_get("temperature_2m", i),
+                    wind_speed_kmh=_get("wind_speed_10m", i),
+                    snowfall_cm=_get("snowfall", i),
+                )
+            )
+        return records
