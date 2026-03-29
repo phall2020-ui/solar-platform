@@ -95,6 +95,11 @@ class Settings(BaseSettings):
 
     # Notion integration (irradiance DB — auto-created on first sync)
     notion_irradiance_database_id: str = Field(default="", description="Auto-created if empty")
+    # Notion integration (Stark HH daily data — used by stark_fusion_variance check)
+    notion_stark_daily_database_id: str = Field(
+        default="",
+        validation_alias=AliasChoices("NOTION_STARK_DAILY_DATABASE_ID"),
+    )
     notion_page_id: str = Field(
         default="",
         description="Parent page for new Notion DBs",

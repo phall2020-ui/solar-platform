@@ -35,6 +35,7 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       NOTION_DAILY_JSON_DATABASE_ID: ${{ secrets.NOTION_DAILY_JSON_DATABASE_ID }}
       NOTION_DAILY_JSON_PARENT_PAGE_ID: ${{ secrets.NOTION_DAILY_JSON_PARENT_PAGE_ID }}
+      NOTION_STARK_DAILY_DATABASE_ID: ${{ secrets.NOTION_STARK_DAILY_DATABASE_ID }}
       OUTPUT_DIR: ${{ github.workspace }}/tools/performance-intelligence-copilot/output
       REFERENCE_DATE: ${{ inputs.reference_date }}
       ASSET_FILTER: ${{ inputs.asset_filter }}

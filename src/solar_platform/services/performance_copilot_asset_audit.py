@@ -2204,6 +2204,7 @@ class AssetRegisterAuditService:
             or RepositoryDaylightMetricsFetcher(prefer_archive_irradiance=True)
         )
         self.curtailment_fetcher = curtailment_fetcher or ExportLimitCurtailmentFetcher()
+        self._stark_daily_database_id_cache: str | None = None
 
     @staticmethod
     def confirmed_data_source_matches() -> dict[str, str]:
@@ -2650,12 +2651,18 @@ class AssetRegisterAuditService:
         return any("point lane" in _normalise_key(value) for value in candidates if value)
 
     def _resolve_stark_daily_database_id(self) -> str:
+        if self._stark_daily_database_id_cache is not None:
+            return self._stark_daily_database_id_cache
         configured = str(getattr(self.settings, "notion_stark_daily_database_id", "") or "").strip()
         if configured:
+            self._stark_daily_database_id_cache = configured
             return configured
         finder = getattr(self.notion_service, "find_database_by_title", None)
         if callable(finder):
-            return str(finder(STARK_DAILY_DATABASE_TITLE) or "").strip()
+            result = str(finder(STARK_DAILY_DATABASE_TITLE) or "").strip()
+            self._stark_daily_database_id_cache = result
+            return result
+        self._stark_daily_database_id_cache = ""
         return ""
 
     def _lookup_stark_daily_total(self, target_date: date) -> float | None:
