@@ -294,7 +294,7 @@ def generate_report(all_statuses: List[SiteStatus], logger: logging.Logger, mete
             return False
         
         # Check if inverters have explicit OFFLINE state (not just WARNING or UNKNOWN)
-        from clients.base import InverterState
+        from .clients.base import InverterState
         offline_inverters = sum(1 for inv in status.inverters if inv.state == InverterState.OFFLINE)
         
         # Only proceed if ALL inverters are explicitly OFFLINE
@@ -740,6 +740,7 @@ def validate_config(config: dict, logger: logging.Logger):
             'sungrow': SungrowClient,
             'sungrow_browser': SungrowBrowserClient,
             'sungrow_web': SungrowWebClient,
+            'juggle': JuggleClient,
         }
         
         client_class = client_classes.get(platform_name.lower())

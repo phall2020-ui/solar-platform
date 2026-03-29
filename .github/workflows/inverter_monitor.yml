@@ -57,8 +57,8 @@ jobs:
           IM__PLATFORMS__SOLAREDGE_BROWSER__USERNAME: ${{ secrets.SOLAREDGE_USER }}
           IM__PLATFORMS__SOLAREDGE_BROWSER__PASSWORD: ${{ secrets.SOLAREDGE_PASS }}
           IM__PLATFORMS__SOLIS__ENABLED: true
-          IM__PLATFORMS__SOLIS__API_ID: ${{ secrets.SOLIS_API_ID }}
-          IM__PLATFORMS__SOLIS__API_SECRET: ${{ secrets.SOLIS_API_SECRET }}
+          IM__PLATFORMS__SOLIS__API_ID: ${{ secrets.SOLIS_KEY_ID }}
+          IM__PLATFORMS__SOLIS__API_SECRET: ${{ secrets.SOLIS_KEY_SECRET }}
           IM__PLATFORMS__SUNGROW_BROWSER__ENABLED: true
           IM__PLATFORMS__SUNGROW_BROWSER__USERNAME: ${{ secrets.SUNGROW_USER }}
           IM__PLATFORMS__SUNGROW_BROWSER__PASSWORD: ${{ secrets.SUNGROW_PASS }}
@@ -67,6 +67,7 @@ jobs:
           IM__NOTIFICATIONS__ENABLED: true
           IM__NOTIFICATIONS__NTFY__ENABLED: true
           IM__NOTIFICATIONS__NTFY__TOPIC: ${{ secrets.NTFY_TOPIC }}
+          IM__PLATFORMS__JUGGLE__API_KEY: ${{ secrets.JUGGLE_API_KEY }}
         run: solar-monitor
 
       - name: Upload reports
