@@ -7,7 +7,7 @@ on:
     branches:
       - main
     paths:
-      - 'jobs/inverter-daily-checks/**'
+      - 'src/solar_platform/monitoring/**'
   workflow_dispatch:  # Manual trigger
 
 jobs:
@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: jobs/inverter-daily-checks
+        working-directory: .
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -25,16 +25,16 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
-          cache-dependency-path: jobs/inverter-daily-checks/requirements.txt
+          cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          pip install -e ".[monitoring]"
           python -m playwright install chromium
 
       - name: Solar Schedule Check
         id: solar_check
-        run: python inverter_monitor.py --solar-check
+        run: solar-monitor --solar-check
         continue-on-error: true
 
       - name: Setup Google Drive Credentials
@@ -67,11 +67,11 @@ jobs:
           IM__NOTIFICATIONS__ENABLED: true
           IM__NOTIFICATIONS__NTFY__ENABLED: true
           IM__NOTIFICATIONS__NTFY__TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: python inverter_monitor.py
+        run: solar-monitor
 
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: reports
-          path: jobs/inverter-daily-checks/reports/
+          path: reports/
