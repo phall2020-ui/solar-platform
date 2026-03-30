@@ -56,6 +56,27 @@ class PortfolioSummary(BaseModel):
     total_generation_kwh: float = 0.0
 
 
+class OfftakerConsumptionEntry(BaseModel):
+    date: str
+    generation_kwh: float
+    export_kwh: float
+    consumption_kwh: float
+    consumption_pct: float | None = None
+
+
+class OfftakerConsumptionResponse(BaseModel):
+    plant_uid: str
+    pv_meter_id: str
+    start_date: str
+    end_date: str
+    total_generation_kwh: float
+    total_export_kwh: float
+    total_consumption_kwh: float
+    total_consumption_pct: float | None = None
+    days: list[OfftakerConsumptionEntry]
+    warnings: list[str] = []
+
+
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
@@ -157,6 +178,68 @@ def get_readings(
     return results
 
 
+@app.get(
+    "/api/v1/plants/{plant_uid}/offtaker-consumption",
+    response_model=OfftakerConsumptionResponse,
+    tags=["consumption"],
+)
+def offtaker_consumption(
+    plant_uid: str,
+    start: str | None = Query(None, description="Start date YYYY-MM-DD (default: 30 days ago)"),
+    end: str | None = Query(None, description="End date YYYY-MM-DD (default: today)"),
+    pv_meter: str | None = Query(None, description="Override PV meter EMIG ID (auto-discovered if omitted)"),
+) -> OfftakerConsumptionResponse:
+    """Return how much solar generation was consumed on-site by the offtaker vs exported to the grid.
+
+    Uses the PV generation meter (EMIG API, device type=PV) which records:
+      - ``importEnergy``: cumulative energy from the solar array into the meter (total generation)
+      - ``exportEnergy``: cumulative energy from the meter out to the grid
+
+    ``consumption_kwh = generation_kwh − export_kwh``
+    """
+    from datetime import date, timedelta
+
+    from solar_platform.monitoring.offtaker_consumption import OfftakerConsumptionService
+
+    today = date.today()
+    end_d = _parse_date(end) or today
+    start_d = _parse_date(start) or (end_d - timedelta(days=30))
+
+    svc = OfftakerConsumptionService()
+    result = svc.get_consumption(
+        plant_uid=plant_uid,
+        start_date=start_d,
+        end_date=end_d,
+        pv_meter_id=pv_meter,
+    )
+
+    return OfftakerConsumptionResponse(
+        plant_uid=result.plant_uid,
+        pv_meter_id=result.pv_meter_id,
+        start_date=str(result.start_date),
+        end_date=str(result.end_date),
+        total_generation_kwh=round(result.total_generation_kwh, 2),
+        total_export_kwh=round(result.total_export_kwh, 2),
+        total_consumption_kwh=round(result.total_consumption_kwh, 2),
+        total_consumption_pct=(
+            round(result.total_consumption_pct, 1)
+            if result.total_consumption_pct is not None
+            else None
+        ),
+        days=[
+            OfftakerConsumptionEntry(
+                date=str(d.date),
+                generation_kwh=d.generation_kwh,
+                export_kwh=d.export_kwh,
+                consumption_kwh=d.consumption_kwh,
+                consumption_pct=d.consumption_pct,
+            )
+            for d in result.days
+        ],
+        warnings=result.warnings,
+    )
+
+
 @app.get("/api/v1/portfolio/summary", response_model=PortfolioSummary, tags=["portfolio"])
 def portfolio_summary() -> PortfolioSummary:
     """Return high-level KPIs for the whole portfolio."""
@@ -207,6 +290,19 @@ def _safe_float(val: object) -> float | None:
         return f
     except (TypeError, ValueError):
         return None
+
+
+def _parse_date(val: str | None) -> "date | None":
+    if not val:
+        return None
+    from datetime import date
+
+    for fmt in ("%Y-%m-%d", "%Y%m%d"):
+        try:
+            return datetime.strptime(val, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 def _parse_datetime(val: str | None) -> "datetime | None":
