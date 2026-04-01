@@ -1,0 +1,9 @@
+customtkinter>=5.2.0
+numpy>=1.24.0
+numpy-financial>=1.0.0
+scipy>=1.10.0
+openpyxl>=3.1.0
+reportlab>=4.0.0
+Pillow>=10.0.0
+tkcalendar>=1.6.1
+pyinstaller>=6.0.0
