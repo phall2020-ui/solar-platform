@@ -288,7 +288,7 @@ class ExportLimitCurtailmentFetcher:
             return self._build_curtailment_result(
                 generation_loss_kwh=daylight_gap_kwh,
                 ppa_rate_gbp_mwh=ppa_rate,
-                confidence=0.95,
+                confidence=0.95,  # live telemetry — highest confidence
                 message=(
                     f"Detected from live export-limit telemetry with {api_signal['curtailed_records']} curtailed intervals."
                     f"{min_limit_fragment}"
@@ -306,7 +306,7 @@ class ExportLimitCurtailmentFetcher:
             return self._build_curtailment_result(
                 generation_loss_kwh=daylight_gap_kwh,
                 ppa_rate_gbp_mwh=ppa_rate,
-                confidence=0.95,
+                confidence=0.80,  # stored history — reliable but may have coverage gaps
                 message=(
                     f"Detected from export-limit history with {history_signal['curtailed_records']} curtailed intervals."
                     f"{min_limit_fragment}"
@@ -348,7 +348,7 @@ class ExportLimitCurtailmentFetcher:
         return self._build_curtailment_result(
             generation_loss_kwh=generation_loss_kwh,
             ppa_rate_gbp_mwh=ppa_rate,
-            confidence=0.95,
+            confidence=0.60,  # DB fallback via power-plateau detection — lower reliability
             message=(
                 f"Detected from export-limit telemetry with {curtailed_records} curtailed intervals."
                 f"{rate_fragment}"

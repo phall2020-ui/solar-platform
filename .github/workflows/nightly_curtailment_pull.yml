@@ -1,0 +1,93 @@
+name: Nightly Curtailment Pull
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 03:00 UTC — after midnight UK, before business hours
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: 'Start date (YYYY-MM-DD). Defaults to yesterday.'
+        required: false
+        default: ''
+      end_date:
+        description: 'End date (YYYY-MM-DD). Defaults to today.'
+        required: false
+        default: ''
+
+concurrency:
+  group: nightly-curtailment-pull
+  cancel-in-progress: false
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: ${{ github.workspace }}/src
+      JUGGLE_API_KEY: ${{ secrets.JUGGLE_API_KEY }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[monitoring]"
+
+      - name: Validate required secrets
+        run: |
+          if [ -z "$JUGGLE_API_KEY" ]; then
+            echo "::error::JUGGLE_API_KEY secret is not set."
+            exit 1
+          fi
+
+      - name: Resolve date range
+        id: dates
+        run: |
+          START="${{ github.event.inputs.start_date }}"
+          END="${{ github.event.inputs.end_date }}"
+          if [ -z "$START" ]; then
+            START="$(date -u -d 'yesterday' +%Y-%m-%d 2>/dev/null || date -u -v-1d +%Y-%m-%d)"
+          fi
+          if [ -z "$END" ]; then
+            END="$(date -u +%Y-%m-%d)"
+          fi
+          echo "start=$START" >> "$GITHUB_OUTPUT"
+          echo "end=$END"   >> "$GITHUB_OUTPUT"
+          echo "Pulling curtailment data: $START to $END"
+
+      - name: Pull export limit history
+        run: |
+          python cli/export_limit_pull.py \
+            --start "${{ steps.dates.outputs.start }}" \
+            --end   "${{ steps.dates.outputs.end }}"
+
+      - name: Upload curtailment data
+        uses: actions/upload-artifact@v4
+        with:
+          name: curtailment-data-${{ steps.dates.outputs.start }}
+          path: platform/data/export_limits/
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Write job summary
+        if: always()
+        run: |
+          START="${{ steps.dates.outputs.start }}"
+          END="${{ steps.dates.outputs.end }}"
+          {
+            echo "## Nightly Curtailment Pull"
+            echo ""
+            echo "| Item | Value |"
+            echo "| --- | --- |"
+            echo "| Period | \`$START\` to \`$END\` |"
+            echo "| Outcome | ${{ job.status }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

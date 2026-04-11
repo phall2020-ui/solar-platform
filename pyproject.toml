@@ -100,6 +100,7 @@ ignore = ["E501"]
 testpaths = ["tests"]
 python_files = "test_*.py"
 markers = [
+    "unit: Fast unit tests with no external dependencies",
     "integration: Integration tests against real DuckDB",
     "e2e: End-to-end tests covering full workflows",
     "performance: Performance and speed benchmarks",

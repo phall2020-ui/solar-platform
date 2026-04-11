@@ -1,10 +1,22 @@
+# ARCHIVED — 2026-04-04
+#
+# This script was a one-off analysis tool.  It should not be used for new
+# curtailment pulls.  Use cli/export_limit_pull.py instead, which discovers
+# LIMITATION devices dynamically and stores results in platform/data/export_limits/.
+#
+# Kept here for reference only.  Known issues in this file:
+#   - API key was previously hardcoded (now read from env); rotate if exposed.
+#   - Phantom-record bug fixed below: Smeed Dean proxy timestamps are no longer
+#     added to all_timestamps; they only fill irradiance for existing timestamps.
+#   - Only the first target device per site is used; multi-device sites incomplete.
+
 import requests
 from datetime import datetime, timedelta
 import collections
 import os
 import csv
 
-API_KEY = "380fe299-a626-48f1-8456-e701c7383a23"
+API_KEY = os.getenv("JUGGLE_API_KEY", "")
 BASE_URL = "https://www.emig.co.uk/p/api"
 
 # Mapping of plants we know have exportLimit data.
@@ -129,9 +141,11 @@ def pull_curtailment_data(days_back=7):
         weather_readings = fetch_readings(weather_device, start_str, end_str) if weather_device else {}
         power_readings = fetch_readings(power_device, start_str, end_str) if power_device else {}
         
-        # Merge by timestamp
-        # Include Smeed weather timestamps so we don't miss intervals where target device dropped offline
-        all_timestamps = set(limit_readings.keys()) | set(weather_readings.keys()) | set(power_readings.keys()) | set(smeed_weather_readings.keys())
+        # Merge by timestamp.
+        # Do NOT include Smeed Dean timestamps — the proxy only fills irradiance for
+        # intervals the site itself reported.  Including Smeed Dean keys created phantom
+        # records where actual_power defaulted to 0.
+        all_timestamps = set(limit_readings.keys()) | set(weather_readings.keys()) | set(power_readings.keys())
         
         for ts in sorted(all_timestamps):
             limit_r = limit_readings.get(ts, {})
@@ -183,20 +197,34 @@ def pull_curtailment_data(days_back=7):
             theoretical_power_kw = 0.0
             loss_kwh = 0.0
             est_method = "N/A"
-            
+            prorata_loss_kwh = 0.0
+            prorata_method = "N/A"
+
             if export_limit is not None and float(export_limit) < 100.0:
+                limit_pct = float(export_limit)
+
+                # Method 1: Irradiance-based (PR=0.8)
                 if irradiance_wm2 is not None:
                     # Model: Irradiance / 1000 * DC_Capacity * 0.8 PR
                     theoretical_power_kw = (float(irradiance_wm2) / 1000.0) * dc_capacity * 0.80
                     theoretical_power_kw = max(0.0, theoretical_power_kw)
-                    
+
                     lost_power_kw = max(0.0, theoretical_power_kw - actual_power_kw)
-                    loss_kwh = lost_power_kw * 0.25 # 15 min interval
+                    loss_kwh = lost_power_kw * 0.25  # 15 min interval
                     est_method = f"PR=0.8 with {irradiance_source.split(' ')[0]}"
                 else:
                     est_method = "Needs SolarGIS Data (Proxy missed)"
                     loss_kwh = 0.0
-                    
+
+                # Method 2: Pro-rata based on export limit percentage
+                # Assumes actual generation = limit_pct% of uncurtailed output.
+                # Uncurtailed = actual / (limit_pct / 100), so loss = actual * (100 - limit_pct) / limit_pct
+                if actual_power_kw > 0 and limit_pct > 0:
+                    prorata_loss_kwh = actual_power_kw * (100.0 - limit_pct) / limit_pct * 0.25
+                    prorata_method = f"Pro-rata @ {limit_pct:.1f}% limit"
+                else:
+                    prorata_method = "No actual power reading"
+
             all_records.append({
                 "site_name": site_name,
                 "plant_uid": uid,
@@ -208,7 +236,9 @@ def pull_curtailment_data(days_back=7):
                 "irradiance_source": irradiance_source,
                 "theoretical_capacity_kw": round(theoretical_power_kw, 2) if theoretical_power_kw else None,
                 "estimated_curtailment_loss_kwh": round(loss_kwh, 3),
-                "estimation_method": est_method
+                "estimation_method": est_method,
+                "prorata_curtailment_loss_kwh": round(prorata_loss_kwh, 3),
+                "prorata_method": prorata_method,
             })
                 
     if not all_records:
@@ -230,29 +260,32 @@ def pull_curtailment_data(days_back=7):
     print(f"\nDone! Saved {len(all_records)} rows to {output_path}")
     
     # Summary Printout
-    print("\n" + "="*50)
-    print("ESTIMATED KWH CURTAILMENT LOSS SUMMARY (7 DAYS)")
-    print("="*50)
-    
-    site_losses = collections.defaultdict(float)
+    print(f"\n{'='*70}")
+    print(f"{'CURTAILMENT LOSS SUMMARY':^70}")
+    print(f"{'='*70}")
+    print(f"{'Site':<35} {'Events':>6}  {'Irradiance (kWh)':>17}  {'Pro-rata (kWh)':>14}")
+    print(f"{'-'*70}")
+
+    site_losses_irr = collections.defaultdict(float)
+    site_losses_pro = collections.defaultdict(float)
     site_events = collections.defaultdict(int)
-    
+
     for r in all_records:
-        loss = float(r["estimated_curtailment_loss_kwh"] or 0)
         limit = r["export_limit_pct"]
         if limit is not None and float(limit) < 100.0:
             site_events[r["site_name"]] += 1
-            site_losses[r["site_name"]] += loss
-            
+            site_losses_irr[r["site_name"]] += float(r["estimated_curtailment_loss_kwh"] or 0)
+            site_losses_pro[r["site_name"]] += float(r["prorata_curtailment_loss_kwh"] or 0)
+
     if not site_events:
         print("No curtailment events found.")
     else:
-        for site, events in site_events.items():
-            loss = site_losses[site]
-            if loss > 0:
-                print(f"{site}: {loss:.2f} kWh lost over {events} fifteen-min intervals")
-            else:
-                print(f"{site}: {events} intervals curtailed, but unable to estimate loss locally (Needs SolarGIS irradiance data)")
+        for site in sorted(site_events.keys()):
+            events = site_events[site]
+            irr = site_losses_irr[site]
+            pro = site_losses_pro[site]
+            irr_str = f"{irr:.2f}" if irr > 0 else "no irradiance data"
+            print(f"{site:<35} {events:>6}  {irr_str:>17}  {pro:>14.2f}")
 
 if __name__ == "__main__":
     pull_curtailment_data(days_back=7)

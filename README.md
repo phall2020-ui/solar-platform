@@ -117,6 +117,21 @@ Use these directories for all new work:
 - `cli/`
 - `tests/`
 
+## GitHub Actions workflows
+
+Six scheduled workflows run against this repository:
+
+| Workflow | Schedule | What it does |
+|----------|----------|-------------|
+| `daily_notion_pull.yml` | 03:00 + 04:00 UTC daily | Pulls generation data and syncs to Notion |
+| `inverter_monitor.yml` | Hourly | Inverter health check (solar-gated inside the job) |
+| `site_onboarding_om_sync.yml` | Every 15 min | Syncs site onboarding records to O&M tracker |
+| `weekly_email_queue.yml` | Monday 03:00/04:00 UTC | Sends weekly performance email (UK-time gated) |
+| `monthly_email_queue.yml` | After daily sync completes | Sends monthly summary email |
+| `copilot_asset_audit.yml` | Manual (`workflow_dispatch`) | Runs AI-assisted asset audit |
+
+`daily_email_queue.yml` is retired — weekly alerts replaced it.
+
 ## Related docs
 
 - `docs/ADMIN_GUIDE.md`

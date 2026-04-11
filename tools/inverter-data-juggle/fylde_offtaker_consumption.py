@@ -40,7 +40,8 @@ import requests
 API_KEY = os.environ.get("JUGGLE_API_KEY", "380fe299-a626-48f1-8456-e701c7383a23")
 BASE_URL = "https://www.emig.co.uk/p/api"
 PLANT_UID = "ERS:00001"
-PV_METER_ID = "PV:000771"          # type=PV on ERS:00001 — total generation meter
+PV_METER_ID = "PV:000771"          # type=PV — generation meter (importEnergy = solar generation)
+IE_METER_IDS = ["MET:002099", "MET:002107"]  # Import/Export meters — exportEnergy = grid export
 COMMISSION_DATE = date(2025, 6, 1)  # Start of operations
 
 
@@ -67,8 +68,8 @@ def _headers() -> Dict[str, str]:
 
 def fetch_meter_readings(emig_id: str, start: date, end: date) -> List[Dict]:
     """Fetch half-hourly readings for a meter over the given date range."""
-    # The EMIG API accepts up to ~104 days per call; chunk for safety.
-    MAX_CHUNK = 90
+    # The EMIG API 413s on large ranges; keep chunks to 30 days.
+    MAX_CHUNK = 30
     all_readings: List[Dict] = []
     cursor = start
     while cursor <= end:
@@ -274,31 +275,30 @@ def main() -> None:
     print(f"  Period:   {start}  →  {end}")
     print(f"  ({(end - start).days + 1} days)\n")
 
-    print(f"Fetching PV meter readings for {args.pv_meter}...")
-    readings = fetch_meter_readings(args.pv_meter, start, end)
+    print(f"Fetching generation meter readings ({args.pv_meter})...")
+    pv_readings = fetch_meter_readings(args.pv_meter, start, end)
 
-    if not readings:
-        print("\nERROR: No readings returned.  Check API key and meter ID.")
+    if not pv_readings:
+        print("\nERROR: No readings returned from generation meter. Check API key and meter ID.")
         sys.exit(1)
 
-    print(f"\nTotal readings fetched: {len(readings)}")
+    print(f"  Total: {len(pv_readings)} readings\n")
 
-    # Compute daily energy from the two cumulative counters
-    daily_gen = daily_delta_kwh(readings, "importEnergy")   # array → meter
-    daily_exp = daily_delta_kwh(readings, "exportEnergy")   # meter → grid
+    # Fetch grid export from the two Import/Export meters (processed separately, then summed)
+    daily_exp: Dict[date, float] = {}
+    for ie_id in IE_METER_IDS:
+        print(f"Fetching I/E meter readings ({ie_id})...")
+        ie_readings = fetch_meter_readings(ie_id, start, end)
+        print(f"  Total: {len(ie_readings)} readings\n")
+        for d, kwh in daily_delta_kwh(ie_readings, "exportEnergy").items():
+            daily_exp[d] = daily_exp.get(d, 0.0) + kwh
 
-    if not daily_gen and not daily_exp:
-        # Try fallback field names
-        daily_gen = daily_delta_kwh(readings, "import_energy")
-        daily_exp = daily_delta_kwh(readings, "export_energy")
+    # Generation = importEnergy on the PV generation meter
+    daily_gen = daily_delta_kwh(pv_readings, "importEnergy")
 
     if not daily_gen:
-        print("\nWARNING: importEnergy field not found in readings.")
-        print("Available fields in first reading:", list(readings[0].keys()) if readings else "N/A")
-        # Show raw sample so the user can identify the correct field name
-        if readings:
-            import json
-            print("Sample reading:", json.dumps(readings[-1], indent=2)[:600])
+        print("\nWARNING: importEnergy field not found in PV meter readings.")
+        print("Available fields:", list(pv_readings[0].keys()) if pv_readings else "N/A")
         sys.exit(1)
 
     print_monthly_report(daily_gen, daily_exp)
